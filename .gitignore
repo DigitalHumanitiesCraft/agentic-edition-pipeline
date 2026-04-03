@@ -1,0 +1,29 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Data (user-provided and generated)
+data/processed/
+data/sources/
+
+# Results (generated)
+results/
+
+# Generated frontend data
+docs/data/
+
+# IDE and OS
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+*.bak
+*.swp
