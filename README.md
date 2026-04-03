@@ -1,124 +1,147 @@
 # Agentic Edition Pipeline
 
-Forkable template for AI-assisted digital scholarly editions. From digitised source to TEI-XML and published frontend. Promptotyping methodology, Claude Code as operator, human as Critical Expert in the Loop.
+Forkable template for AI-assisted digital scholarly editions. From digitised source to TEI-XML and published frontend on GitHub Pages.
+
+Created by [Christopher Pollin](https://github.com/chpollin) ([Digital Humanities Craft](https://github.com/DigitalHumanitiesCraft)). Built with [Claude Code](https://claude.ai/code) using the [Promptotyping](https://doi.org/10.58079/15t4s) methodology.
 
 ## What this is
 
 A project folder with pre-built Python scripts, prompt templates, a knowledge base, and a `CLAUDE.md` that tells Claude Code what to do. Not a GUI tool, not a framework, not a SaaS product.
 
-The template generalises four production-grade edition projects into a reusable pipeline that goes from PDF/image scans to valid TEI-XML (DTA-Basisformat) and a static frontend on GitHub Pages.
+The template generalises four production-grade edition projects into a reusable pipeline that goes from PDF/image scans to valid TEI-XML (DTA-Basisformat) and a published static frontend.
 
-## Quickstart
+## How to use
 
-1. **Fork** this repository
-2. **Fill in** `knowledge/01_PROJECT.md` through `04_TEI_MAPPING.md` with your project data
-3. **Place** your source material in `data/sources/` (PDFs, images, or existing transcriptions)
-4. **Copy** `.env.example` to `.env` and add your API keys
-5. **Start** Claude Code. It reads `CLAUDE.md` and guides you through the pipeline step by step.
+### Prerequisites
+
+- Python 3.10+
+- [Claude Code](https://claude.ai/code) (Anthropic's agentic coding tool)
+- An API key for at least one LLM provider (Gemini, OpenAI, Anthropic, or a local Ollama instance)
+
+### Step-by-step
+
+1. **Fork** this repository on GitHub
+2. **Clone** your fork locally
+3. **Install dependencies**
+   ```
+   pip install -r requirements.txt
+   ```
+4. **Set up API keys** by copying `.env.example` to `.env` and adding your keys
+   ```
+   cp .env.example .env
+   ```
+5. **Place your source material** in `data/sources/`
+   - PDFs go into `data/sources/pdf/`
+   - Images go into `data/sources/images/`
+   - Existing transcriptions go into `data/sources/text/`
+6. **Start Claude Code** in the project directory. It reads `CLAUDE.md` and asks a series of questions about your edition project (data types, edition type, research question, editorial guidelines). Based on your answers, it fills in the knowledge documents and runs the pipeline step by step.
+
+Each pipeline step has a verification checkpoint where you review the results before proceeding. Steps 4 (validation) and 5 (TEI annotation) work in deterministic mode without API keys. LLM-based features are optional enhancements.
+
+### Local preview
+
+At any checkpoint, preview the edition in your browser:
+```
+cd pipeline
+python 06_build_frontend.py --serve
+```
+This starts a local server at `http://localhost:8080` serving the same files that will be published on GitHub Pages.
+
+### Publishing
+
+Enable GitHub Pages in your repository settings (source: deploy from branch, branch: main, folder: /docs). The included workflow at `.github/workflows/pages.yml` handles deployment automatically on push to main.
+
+## Pipeline overview
+
+```
+01 Extract Images    PDF → page images (PyMuPDF)
+02 Analyze           Corpus inventory and classification
+   ── verify inventory ──
+03 Transcribe        OCR/HTR via LLM (sample first, then full corpus)
+   ── verify transcription quality ──
+04 Validate          Deterministic rules + optional LLM judge
+   ── review quality summary ──
+05 Annotate TEI      Deterministic TEI generation + optional LLM annotation
+   ── preview edition, verify TEI ──
+5b Design            Requirements engineering (epics, user stories, UI components)
+   ── verify design ──
+06 Build Frontend    Generate catalog and viewer data for static site
+   ── verify published edition ──
+```
 
 ## Repository structure
 
 ```
 agentic-edition-pipeline/
 ├── CLAUDE.md                    # Operational protocol for Claude Code
-├── README.md
-├── LICENSE                      # CC-BY 4.0
-├── .env.example                 # API key template
-├── requirements.txt             # Python 3.10+, minimal dependencies
-│
 ├── knowledge/                   # Promptotyping knowledge base (Obsidian-compatible)
-│   ├── 00_INDEX.md              # Navigation, document matrix, RIDE checklist
-│   ├── 01_PROJECT.md            # Project metadata, research question, publication target
-│   ├── 02_DATA.md               # Corpus description, inventory, source types
+│   ├── 00_INDEX.md              # Navigation, RIDE self-assessment checklist
+│   ├── 01_PROJECT.md            # Project metadata, research question
+│   ├── 02_DATA.md               # Corpus description, source types, inventory
 │   ├── 03_CONTEXT.md            # Editorial guidelines, transcription conventions
-│   ├── 04_TEI_MAPPING.md        # Source structure to TEI element mapping
-│   ├── 05_DECISIONS.md          # Architecture Decision Records
-│   └── 06_JOURNAL.md            # Development journal per session
-│
-├── pipeline/                    # Python scripts
-│   ├── config.py                # Configuration, paths, utilities
-│   ├── llm.py                   # Multi-provider LLM abstraction
-│   ├── 01_extract_images.py     # PDF to individual page images
-│   ├── 02_analyze.py            # Corpus inventory and classification
-│   ├── 03_transcribe.py         # OCR/HTR via LLM API
+│   ├── 04_TEI_MAPPING.md        # Source structure → TEI element mapping
+│   ├── 05_DESIGN.md             # Epics, user stories, UI components, wireframes
+│   ├── 06_DECISIONS.md          # Architecture Decision Records
+│   └── 07_JOURNAL.md            # Development journal
+├── pipeline/                    # Python scripts (6 steps + infrastructure)
+│   ├── config.py                # Paths, API config, shared utilities
+│   ├── llm.py                   # Multi-provider LLM (Gemini, OpenAI, Anthropic, Ollama)
+│   ├── 01_extract_images.py     # PDF → page images
+│   ├── 02_analyze.py            # Corpus inventory
+│   ├── 03_transcribe.py         # OCR/HTR with chunking and quality signals
 │   ├── 04_validate.py           # Hybrid validation (rules + LLM judge)
-│   ├── 05_annotate_tei.py       # Transcription to TEI-XML
-│   ├── 06_build_frontend.py     # TEI to static site
-│   └── prompts/                 # Prompt templates
-│       ├── transcription.md     # 4-layer transcription prompt
-│       ├── validation.md        # 4-perspective validation judge
-│       └── annotation.md        # 3-layer TEI annotation prompt
-│
-├── schemas/
-│   └── dtabf.json               # DTA-Basisformat JSON Schema Profile
-│
-├── data/
-│   ├── sources/                 # Input data (provided by human)
-│   └── processed/               # Pipeline output (generated by scripts)
-│
-├── results/
-│   ├── tei/                     # Final TEI-XML files
-│   └── reports/                 # Validation reports
-│
-├── docs/                        # GitHub Pages frontend
-│   ├── index.html
-│   ├── css/style.css
-│   └── js/app.js
-│
-└── .github/workflows/
-    └── pages.yml                # GitHub Pages deployment
+│   ├── 05_annotate_tei.py       # TEI-XML generation with validation
+│   ├── 06_build_frontend.py     # TEI → static site data + local server
+│   └── prompts/                 # Prompt templates (transcription, validation, annotation)
+├── schemas/dtabf.json           # DTA-Basisformat JSON Schema (57 elements)
+├── docs/                        # Static frontend (GitHub Pages root)
+├── data/sources/                # Input data (your source material)
+├── data/processed/              # Intermediate results (generated)
+└── results/tei/                 # Final TEI-XML files
 ```
-
-## Pipeline
-
-Six steps with human verification checkpoints between them.
-
-```
-01 Extract Images    PDF → page images
-02 Analyze           Inventory, format detection
-   ── human verifies inventory ──
-03 Transcribe        OCR/HTR via LLM (sample first, then full corpus)
-   ── human verifies transcription quality ──
-04 Validate          Deterministic rules + LLM judge + quality signals
-   ── human reviews quality summary ──
-05 Annotate TEI      Deterministic structure + optional LLM annotation
-   ── human validates TEI sample ──
-06 Build Frontend    TEI → static site with catalog, viewer, search
-   ── human checks frontend ──
-```
-
-Steps 4 and 5 work in deterministic mode without API keys. LLM-based validation and annotation are optional enhancements.
 
 ## Methodology
 
-**Promptotyping** (Pollin 2026a) is a context engineering method for iterative development of research tools through structured LLM interaction. Four phases: Preparation, Exploration, Distillation, Implementation. The `knowledge/` documents are Promptotyping Documents.
+**Promptotyping** (Pollin 2026a) is a context engineering method for iterative development of research tools through structured LLM interaction. Four phases: Preparation, Exploration, Distillation, Implementation. The `knowledge/` documents are the Promptotyping Documents that steer Claude Code's behaviour.
 
-**Critical Expert in the Loop.** The human is not a quality controller at the end but an integral part of the process. Every processing step produces intermediate results in established formats (JSON, TEI-XML) that can be verified through schema validation, tests, human inspection, and LLM-as-a-Judge. The human decides at defined checkpoints whether the next step may start.
+**Critical Expert in the Loop.** Every processing step produces intermediate results in established formats (JSON, TEI-XML) that can be verified through schema validation, human inspection, and LLM-as-a-Judge. Defined checkpoints require explicit approval before proceeding.
 
-**Asymmetric Amplification.** Frontier LLMs do not automate research work but amplify it disruptively. Productive use requires domain expertise and amplifies existing competence advantages. This template is designed for domain experts, not as a replacement for editorial competence.
+**Epistemic Infrastructure.** The ensemble of mechanisms that make LLM-generated results verifiable, curatable, and documentable. Provenance metadata in every generated file. Architecture Decision Records. Session journal. Quality signals at every pipeline stage.
 
 ## Reference projects
 
-| Repository | Strength |
-|---|---|
-| [zbz-ocr-tei](https://github.com/chpollin/zbz-ocr-tei) | End-to-end PDF to TEI, epistemic infrastructure |
-| [szd-htr-ocr-pipeline](https://github.com/chpollin/szd-htr-ocr-pipeline) | Scaling, prompt grouping, quality signals, viewer |
-| [co-ocr-htr](https://github.com/DigitalHumanitiesCraft/co-ocr-htr) | Provider abstraction, hybrid validation, PAGE-XML |
-| [teiCrafter](https://github.com/DigitalHumanitiesCraft/teiCrafter) | TEI prompt architecture, schema guidance, post-generation validation |
+This template distils knowledge and code from four production-grade repositories. Each has a `knowledge/` folder with synthesized project knowledge.
+
+| Repository | Corpus | Strength |
+|---|---|---|
+| [zbz-ocr-tei](https://github.com/chpollin/zbz-ocr-tei) | 286 docs, 4152 pages (Jeanne Hersch) | End-to-end PDF→TEI, epistemic infrastructure |
+| [szd-htr-ocr-pipeline](https://github.com/chpollin/szd-htr-ocr-pipeline) | 2107 objects, 18719 scans (Stefan Zweig) | Prompt grouping, quality signals, live viewer |
+| [co-ocr-htr](https://github.com/DigitalHumanitiesCraft/co-ocr-htr) | Browser-based workbench | Multi-provider LLM, hybrid validation, PAGE-XML |
+| [teiCrafter](https://github.com/DigitalHumanitiesCraft/teiCrafter) | Browser-based annotation | TEI prompt architecture, schema guidance |
 
 ## Quality framework
 
-This template is designed so that every forked edition structurally addresses the [IDE criteria for reviewing digital scholarly editions](https://www.i-d-e.de/publikationen/weitereschriften/criteria-version-1-1). See `knowledge/00_INDEX.md` for the RIDE self-assessment checklist.
+Every forked edition structurally addresses the [IDE criteria for reviewing digital scholarly editions](https://www.i-d-e.de/publikationen/weitereschriften/criteria-version-1-1) (v1.1), [tools](https://www.i-d-e.de/publikationen/weitereschriften/criteria-tools-version-1) (v1), and [text collections](https://www.i-d-e.de/publikationen/weitereschriften/criteria-text-collections-version-1-0) (v1.0). See `knowledge/00_INDEX.md` for the RIDE self-assessment checklist.
 
 ## Citation
 
-If you use this template in your research, please cite:
-
-```
-Pollin, Christopher. "Agentic Edition Pipeline." DigitalHumanitiesCraft, 2026.
-https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline
+```bibtex
+@software{pollin_agentic_edition_2026,
+  author = {Pollin, Christopher},
+  title = {Agentic Edition Pipeline},
+  year = {2026},
+  publisher = {GitHub},
+  url = {https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline},
+  note = {Forkable template for AI-assisted digital scholarly editions}
+}
 ```
 
 ## License
 
 CC-BY 4.0. See [LICENSE](LICENSE).
+
+## Author
+
+**Christopher Pollin** — [Digital Humanities Craft](https://github.com/DigitalHumanitiesCraft)
+
+Research context: Pollin, Christopher / Kreyenbühl, Elias: "Agentenbasierte Editionsworkflows und epistemische Infrastrukturen. Ein Experiment zur digitalen Edition der Schriften von Jeanne Hersch." 2026.
