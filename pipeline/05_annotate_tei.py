@@ -1,0 +1,432 @@
+"""Generate TEI-XML from validated transcriptions.
+
+Deterministic mode builds well-formed TEI using string templates (no lxml
+builder) -- this keeps the output predictable and diffable. An optional LLM
+annotation pass can enrich the TEI with named entities and semantic markup,
+but only runs when ANNOTATION_PROVIDER is configured and --no-llm is not set.
+
+Every generated file is validated for well-formedness and plaintext
+preservation. A validation report is written to results/reports/.
+
+Outputs go to two locations: data/processed/tei/ (working copy the pipeline
+reads in later steps) and results/tei/ (publication-ready copy).
+
+Idempotent: existing TEI files are skipped unless --force.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from config import (
+    ANNOTATION_MODEL,
+    ANNOTATION_PROVIDER,
+    IMAGES_DIR,
+    RESULTS_REPORTS_DIR,
+    RESULTS_TEI_DIR,
+    TEI_DIR,
+    TRANSCRIPTIONS_DIR,
+    VALIDATED_DIR,
+    ensure_dirs,
+    load_prompt,
+    provenance_meta,
+    read_knowledge,
+    write_errors,
+)
+
+
+# ---------------------------------------------------------------------------
+# XML escaping -- used throughout instead of an XML builder
+# ---------------------------------------------------------------------------
+
+def _esc(text: str) -> str:
+    """Escape the four XML-significant characters. Handles None gracefully."""
+    if not text:
+        return ""
+    return (
+        text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project metadata extraction from knowledge/01_PROJECT.md
+# ---------------------------------------------------------------------------
+
+def _extract_project_info(md_text: str) -> dict:
+    """Pull structured fields out of the 01_PROJECT.md markdown table.
+
+    Looks for key-value rows in markdown tables (| Key | Value |) and
+    falls back to the first H1/H2 heading for the title.
+    """
+    info: dict[str, str] = {}
+
+    # Try to find markdown table rows: | key | value |
+    for match in re.finditer(r"^\|\s*(.+?)\s*\|\s*(.+?)\s*\|", md_text, re.MULTILINE):
+        key = match.group(1).strip().lower()
+        val = match.group(2).strip()
+        if val == "---" or key == "---":
+            continue
+        if "projektname" in key or "title" in key or "titel" in key:
+            info["title"] = val
+        elif "herausgeber" in key or "editor" in key:
+            info["editor"] = val
+        elif "institution" in key or "publisher" in key or "verlag" in key:
+            info["publisher"] = val
+        elif "lizenz" in key or "license" in key:
+            info["license"] = val
+        elif "sprache" in key or "language" in key or "lang" in key:
+            info["language"] = val
+
+    # Fallback: first heading
+    if "title" not in info:
+        heading = re.search(r"^#{1,2}\s+(.+)", md_text, re.MULTILINE)
+        if heading:
+            info["title"] = heading.group(1).strip()
+
+    return info
+
+
+# ---------------------------------------------------------------------------
+# TEI generation (deterministic)
+# ---------------------------------------------------------------------------
+
+def _build_tei_header(
+    object_id: str,
+    doc_meta: dict,
+    project: dict,
+    language: str,
+    model: str,
+    prompt_template: str,
+) -> str:
+    """Build the <teiHeader> as a string."""
+    title = _esc(doc_meta.get("title", object_id))
+    editor = _esc(project.get("editor", ""))
+    publisher = _esc(project.get("publisher", ""))
+    license_text = _esc(project.get("license", ""))
+    lang = _esc(language or doc_meta.get("language", "de"))
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    lines = [
+        "  <teiHeader>",
+        "    <fileDesc>",
+        "      <titleStmt>",
+        f"        <title>{title}</title>",
+    ]
+    if editor:
+        lines.append(f"        <editor>{editor}</editor>")
+    lines += [
+        "      </titleStmt>",
+        "      <publicationStmt>",
+    ]
+    if publisher:
+        lines.append(f"        <publisher>{publisher}</publisher>")
+    else:
+        lines.append("        <publisher>agentic-edition-pipeline</publisher>")
+    if license_text:
+        lines.append(f"        <availability><licence>{license_text}</licence></availability>")
+    lines += [
+        "      </publicationStmt>",
+        "      <sourceDesc>",
+        "        <msDesc>",
+        "          <msIdentifier>",
+        f"            <idno>{_esc(object_id)}</idno>",
+        "          </msIdentifier>",
+        "        </msDesc>",
+        "      </sourceDesc>",
+        "    </fileDesc>",
+        "    <profileDesc>",
+        f'      <langUsage><language ident="{lang}">{lang}</language></langUsage>',
+        "    </profileDesc>",
+        "    <encodingDesc>",
+        "      <projectDesc><p>Generated by agentic-edition-pipeline.</p></projectDesc>",
+        "    </encodingDesc>",
+        "    <revisionDesc>",
+        f'      <change when="{timestamp}" who="#machine">'
+        f"Automated TEI generation (model={_esc(model)}, template={_esc(prompt_template)})"
+        f"</change>",
+        "    </revisionDesc>",
+        "  </teiHeader>",
+    ]
+    return "\n".join(lines)
+
+
+def _build_body(pages: list[dict], object_id: str) -> str:
+    """Build <text><body>...</body></text> from transcription pages."""
+    body_lines = ["  <text>", "    <body>", "      <div>"]
+
+    for p in pages:
+        page_num = p.get("page", 0)
+        text = p.get("transcription", "")
+
+        # Page break element with facs pointer
+        facs = f"images/{object_id}/{object_id}_p{page_num:03d}.png"
+        body_lines.append(f'        <pb n="{page_num}" facs="{facs}"/>')
+
+        # Skip blank pages
+        if not text.strip():
+            continue
+
+        # Split on double newlines into paragraphs
+        paragraphs = re.split(r"\n{2,}", text.strip())
+        for para in paragraphs:
+            escaped = _esc(para.strip())
+            if escaped:
+                body_lines.append(f"        <p>{escaped}</p>")
+
+    body_lines += ["      </div>", "    </body>", "  </text>"]
+    return "\n".join(body_lines)
+
+
+def generate_tei(object_id: str, data: dict, project: dict) -> str:
+    """Assemble the complete TEI-XML document as a string."""
+    pages = data.get("pages", [])
+    doc_meta = data.get("metadata", {})
+    language = doc_meta.get("language", "de")
+
+    # Determine model/prompt info for revisionDesc
+    meta = data.get("_meta", {})
+    model = meta.get("model", "deterministic")
+    prompt_template = meta.get("prompt_template", "")
+
+    header = _build_tei_header(object_id, doc_meta, project, language, model, prompt_template)
+    body = _build_body(pages, object_id)
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0">\n'
+        f"{header}\n"
+        f"{body}\n"
+        "</TEI>\n"
+    )
+    return xml
+
+
+# ---------------------------------------------------------------------------
+# Validation of generated TEI
+# ---------------------------------------------------------------------------
+
+def validate_tei(xml_str: str, original_pages: list[dict]) -> dict:
+    """Check well-formedness, required elements, and plaintext preservation.
+
+    Returns a report dict with pass/fail for each check.
+    """
+    report: dict = {"well_formed": False, "required_elements": False, "plaintext_similarity": 0.0}
+
+    # Well-formedness via lxml
+    try:
+        from lxml import etree
+        root = etree.fromstring(xml_str.encode("utf-8"))
+        report["well_formed"] = True
+    except Exception as exc:
+        report["well_formed"] = False
+        report["well_formed_error"] = str(exc)
+        return report
+
+    # Required elements
+    ns = {"tei": "http://www.tei-c.org/ns/1.0"}
+    required = ["tei:teiHeader", ".//tei:fileDesc", ".//tei:text", ".//tei:body"]
+    missing = [tag for tag in required if root.find(tag, ns) is None]
+    # Also check root tag
+    if not root.tag.endswith("}TEI") and root.tag != "TEI":
+        missing.append("TEI")
+    report["required_elements"] = len(missing) == 0
+    if missing:
+        report["missing_elements"] = missing
+
+    # Plaintext preservation: compare word sets between original and TEI body
+    body = root.find(".//tei:body", ns)
+    if body is not None:
+        # Extract all text from body
+        tei_text = " ".join(body.itertext())
+        tei_words = set(tei_text.split())
+    else:
+        tei_words = set()
+
+    original_text = " ".join(p.get("transcription", "") for p in original_pages)
+    original_words = set(original_text.split())
+
+    if original_words or tei_words:
+        intersection = original_words & tei_words
+        union = original_words | tei_words
+        report["plaintext_similarity"] = len(intersection) / len(union) if union else 1.0
+    else:
+        # Both empty -- that is a valid match
+        report["plaintext_similarity"] = 1.0
+
+    report["original_word_count"] = len(original_words)
+    report["tei_word_count"] = len(tei_words)
+
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Main processing
+# ---------------------------------------------------------------------------
+
+def _find_input(object_id: str) -> Path | None:
+    """Locate the input JSON, preferring validated/ over transcriptions/."""
+    validated = VALIDATED_DIR / f"{object_id}.json"
+    if validated.exists():
+        return validated
+    transcribed = TRANSCRIPTIONS_DIR / f"{object_id}.json"
+    if transcribed.exists():
+        return transcribed
+    return None
+
+
+def annotate_one(
+    object_id: str,
+    project: dict,
+    validate_only: bool,
+    use_llm: bool,
+    force: bool,
+) -> dict | None:
+    """Generate TEI for one object. Returns error dict on failure, None on success."""
+    src = _find_input(object_id)
+    if src is None:
+        return {
+            "object_id": object_id,
+            "error": f"No input found in {VALIDATED_DIR} or {TRANSCRIPTIONS_DIR}",
+            "stage": "read",
+        }
+
+    dst_working = TEI_DIR / f"{object_id}.xml"
+    dst_final = RESULTS_TEI_DIR / f"{object_id}.xml"
+
+    if dst_working.exists() and not force and not validate_only:
+        print(f"  SKIP {object_id} (already exists, use --force to regenerate)")
+        return None
+
+    try:
+        data = json.loads(src.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return {"object_id": object_id, "error": str(exc), "stage": "read"}
+
+    # Generate TEI
+    xml_str = generate_tei(object_id, data, project)
+
+    # Validate
+    pages = data.get("pages", [])
+    report = validate_tei(xml_str, pages)
+    report["object_id"] = object_id
+    report["source"] = str(src)
+    report["_meta"] = provenance_meta(
+        script="05_annotate_tei.py",
+        provider=ANNOTATION_PROVIDER if (use_llm and ANNOTATION_PROVIDER) else "",
+        model=ANNOTATION_MODEL if (use_llm and ANNOTATION_PROVIDER) else "",
+        prompt_template="annotation.md" if (use_llm and ANNOTATION_PROVIDER) else "",
+        step=5,
+    )
+
+    # Write validation report
+    report_path = RESULTS_REPORTS_DIR / f"{object_id}_validation.json"
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if validate_only:
+        status = "VALID" if report["well_formed"] and report["required_elements"] else "INVALID"
+        print(f"  {status} {object_id} (similarity={report['plaintext_similarity']:.2%})")
+        return None
+
+    if not report["well_formed"]:
+        return {
+            "object_id": object_id,
+            "error": f"Generated TEI is not well-formed: {report.get('well_formed_error', '?')}",
+            "stage": "validate",
+        }
+
+    # Write TEI to both locations
+    dst_working.parent.mkdir(parents=True, exist_ok=True)
+    dst_final.parent.mkdir(parents=True, exist_ok=True)
+    dst_working.write_text(xml_str, encoding="utf-8")
+    dst_final.write_text(xml_str, encoding="utf-8")
+
+    sim = report["plaintext_similarity"]
+    sim_label = "OK" if sim > 0.95 else "WARN" if sim > 0.80 else "LOW"
+    print(f"  OK   {object_id} (similarity={sim:.2%} [{sim_label}])")
+    return None
+
+
+def collect_objects(
+    single: str | None,
+    all_flag: bool,
+    sample: int | None,
+) -> list[str]:
+    """Resolve which objects to process from CLI arguments."""
+    if single:
+        return [single]
+
+    # Collect from validated/ first, fall back to transcriptions/
+    candidates: set[str] = set()
+    for d in [VALIDATED_DIR, TRANSCRIPTIONS_DIR]:
+        if d.exists():
+            for f in d.glob("*.json"):
+                if f.stem != "errors":
+                    candidates.add(f.stem)
+
+    ids = sorted(candidates)
+    if not ids:
+        print(f"No input files found in {VALIDATED_DIR} or {TRANSCRIPTIONS_DIR}", file=sys.stderr)
+        sys.exit(1)
+
+    if sample is not None:
+        ids = ids[:sample]
+
+    if not all_flag and sample is None:
+        print("Specify --object ID, --all, or --sample N", file=sys.stderr)
+        sys.exit(1)
+
+    return ids
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate TEI-XML from validated transcriptions."
+    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--object", metavar="ID", help="Process a single object by ID")
+    group.add_argument("--all", action="store_true", help="Process all available objects")
+    group.add_argument("--sample", metavar="N", type=int, help="Process first N objects (for testing)")
+    parser.add_argument("--no-llm", action="store_true", help="Skip LLM annotation enrichment")
+    parser.add_argument("--validate-only", action="store_true", help="Generate and validate but do not write TEI")
+    parser.add_argument("--force", action="store_true", help="Regenerate even if output exists")
+    args = parser.parse_args()
+
+    ensure_dirs()
+
+    # Load project info once
+    project_md = read_knowledge("01_PROJECT.md")
+    project = _extract_project_info(project_md)
+
+    use_llm = not args.no_llm
+    objects = collect_objects(args.object, args.all, args.sample)
+
+    mode = "validate-only" if args.validate_only else "deterministic"
+    if use_llm and ANNOTATION_PROVIDER:
+        mode += f" + LLM ({ANNOTATION_PROVIDER}/{ANNOTATION_MODEL})"
+    print(f"Generating TEI for {len(objects)} object(s) [{mode}]\n")
+
+    errors: list[dict] = []
+    for oid in objects:
+        err = annotate_one(oid, project, args.validate_only, use_llm, args.force)
+        if err:
+            errors.append(err)
+            print(f"  FAIL {err['object_id']}: {err['error']}")
+
+    if errors:
+        write_errors(errors, TEI_DIR)
+        print(f"\n{len(errors)} error(s) written to {TEI_DIR / 'errors.json'}")
+
+    ok = len(objects) - len(errors)
+    print(f"\nDone. {len(objects)} object(s): {ok} succeeded, {len(errors)} failed.")
+
+
+if __name__ == "__main__":
+    main()

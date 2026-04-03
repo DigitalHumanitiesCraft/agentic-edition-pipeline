@@ -10,14 +10,23 @@ __pycache__/
 *.egg-info/
 
 # Data (user-provided and generated)
-data/processed/
-data/sources/
+data/processed/**
+!data/processed/.gitkeep
+data/sources/**
+!data/sources/pdf/
+!data/sources/images/
+!data/sources/text/
+!data/sources/*/.gitkeep
 
 # Results (generated)
-results/
+results/**
+!results/tei/
+!results/reports/
+!results/*/.gitkeep
 
 # Generated frontend data
-docs/data/
+docs/data/**
+!docs/data/.gitkeep
 
 # IDE and OS
 .vscode/

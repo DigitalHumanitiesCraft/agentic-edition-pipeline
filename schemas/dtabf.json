@@ -1,0 +1,806 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DTA-Basisformat TEI Profile",
+  "description": "Structural constraints for TEI elements following the Deutsches Textarchiv Base Format. Defines allowed parent-child relationships, attributes, and self-closing behaviour for each element.",
+  "version": "1.0.0",
+  "namespace": "http://www.tei-c.org/ns/1.0",
+  "elements": {
+    "TEI": {
+      "allowedChildren": ["teiHeader", "text"],
+      "allowedParents": [],
+      "attributes": {
+        "xmlns": {
+          "type": "string",
+          "required": true,
+          "values": ["http://www.tei-c.org/ns/1.0"]
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "teiHeader": {
+      "allowedChildren": ["fileDesc", "profileDesc", "encodingDesc", "revisionDesc"],
+      "allowedParents": ["TEI"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "fileDesc": {
+      "allowedChildren": ["titleStmt", "publicationStmt", "sourceDesc"],
+      "allowedParents": ["teiHeader"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "titleStmt": {
+      "allowedChildren": ["title", "author", "editor"],
+      "allowedParents": ["fileDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "title": {
+      "allowedChildren": ["#text", "hi", "foreign", "name", "persName", "placeName", "date"],
+      "allowedParents": ["titleStmt", "bibl", "msDesc"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false,
+          "values": ["main", "sub", "alt"]
+        },
+        "level": {
+          "type": "string",
+          "required": false,
+          "values": ["a", "m", "s", "j", "u"]
+        }
+      },
+      "selfClosing": false
+    },
+    "author": {
+      "allowedChildren": ["#text", "persName", "name"],
+      "allowedParents": ["titleStmt", "bibl"],
+      "attributes": {
+        "ref": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "editor": {
+      "allowedChildren": ["#text", "persName", "name"],
+      "allowedParents": ["titleStmt"],
+      "attributes": {
+        "role": {
+          "type": "string",
+          "required": false
+        },
+        "ref": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "publicationStmt": {
+      "allowedChildren": ["publisher", "date", "availability"],
+      "allowedParents": ["fileDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "publisher": {
+      "allowedChildren": ["#text", "orgName", "name", "ref"],
+      "allowedParents": ["publicationStmt"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "date": {
+      "allowedChildren": ["#text"],
+      "allowedParents": ["publicationStmt", "origin", "bibl", "titleStmt", "title", "p", "div", "note", "cell", "item", "head"],
+      "attributes": {
+        "when": {
+          "type": "string",
+          "required": false
+        },
+        "notBefore": {
+          "type": "string",
+          "required": false
+        },
+        "notAfter": {
+          "type": "string",
+          "required": false
+        },
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "availability": {
+      "allowedChildren": ["licence", "p"],
+      "allowedParents": ["publicationStmt"],
+      "attributes": {
+        "status": {
+          "type": "string",
+          "required": false,
+          "values": ["free", "restricted", "unknown"]
+        }
+      },
+      "selfClosing": false
+    },
+    "licence": {
+      "allowedChildren": ["#text", "p", "ref"],
+      "allowedParents": ["availability"],
+      "attributes": {
+        "target": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "sourceDesc": {
+      "allowedChildren": ["msDesc", "bibl", "p"],
+      "allowedParents": ["fileDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "msDesc": {
+      "allowedChildren": ["msIdentifier", "physDesc", "history"],
+      "allowedParents": ["sourceDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "msIdentifier": {
+      "allowedChildren": ["repository", "idno"],
+      "allowedParents": ["msDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "repository": {
+      "allowedChildren": ["#text"],
+      "allowedParents": ["msIdentifier"],
+      "attributes": {
+        "ref": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "idno": {
+      "allowedChildren": ["#text"],
+      "allowedParents": ["msIdentifier"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "physDesc": {
+      "allowedChildren": ["p"],
+      "allowedParents": ["msDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "history": {
+      "allowedChildren": ["origin"],
+      "allowedParents": ["msDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "origin": {
+      "allowedChildren": ["origDate", "origPlace", "p"],
+      "allowedParents": ["history"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "origDate": {
+      "allowedChildren": ["#text"],
+      "allowedParents": ["origin"],
+      "attributes": {
+        "when": {
+          "type": "string",
+          "required": false
+        },
+        "notBefore": {
+          "type": "string",
+          "required": false
+        },
+        "notAfter": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "origPlace": {
+      "allowedChildren": ["#text", "placeName"],
+      "allowedParents": ["origin"],
+      "attributes": {
+        "ref": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "profileDesc": {
+      "allowedChildren": ["langUsage", "textClass"],
+      "allowedParents": ["teiHeader"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "langUsage": {
+      "allowedChildren": ["language"],
+      "allowedParents": ["profileDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "language": {
+      "allowedChildren": ["#text"],
+      "allowedParents": ["langUsage"],
+      "attributes": {
+        "ident": {
+          "type": "string",
+          "required": true
+        },
+        "usage": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "textClass": {
+      "allowedChildren": ["keywords"],
+      "allowedParents": ["profileDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "encodingDesc": {
+      "allowedChildren": ["projectDesc", "p"],
+      "allowedParents": ["teiHeader"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "projectDesc": {
+      "allowedChildren": ["p"],
+      "allowedParents": ["encodingDesc"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "revisionDesc": {
+      "allowedChildren": ["change"],
+      "allowedParents": ["teiHeader"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "change": {
+      "allowedChildren": ["#text", "name", "date"],
+      "allowedParents": ["revisionDesc"],
+      "attributes": {
+        "when": {
+          "type": "string",
+          "required": true
+        },
+        "who": {
+          "type": "string",
+          "required": false
+        },
+        "n": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "text": {
+      "allowedChildren": ["body", "front", "back"],
+      "allowedParents": ["TEI"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "body": {
+      "allowedChildren": ["div", "p", "pb", "fw", "table", "list", "figure", "head", "note"],
+      "allowedParents": ["text"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "div": {
+      "allowedChildren": ["div", "p", "head", "pb", "lb", "fw", "note", "table", "list", "figure", "bibl"],
+      "allowedParents": ["body", "div", "front", "back"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "n": {
+          "type": "string",
+          "required": false
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "p": {
+      "allowedChildren": [
+        "#text", "pb", "lb", "hi", "note", "persName", "placeName", "orgName",
+        "name", "date", "bibl", "term", "measure", "foreign", "ref", "figure",
+        "table", "list", "fw"
+      ],
+      "allowedParents": ["div", "body", "note", "availability", "physDesc", "projectDesc", "encodingDesc", "sourceDesc", "licence", "origin", "cell", "item"],
+      "attributes": {
+        "xml:id": {
+          "type": "string",
+          "required": false
+        },
+        "rendition": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "head": {
+      "allowedChildren": [
+        "#text", "lb", "hi", "persName", "placeName", "orgName", "name",
+        "date", "note", "ref", "foreign", "pb"
+      ],
+      "allowedParents": ["div", "body", "list", "table", "figure"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "rendition": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "pb": {
+      "allowedChildren": [],
+      "allowedParents": ["body", "div", "p", "head", "note", "cell", "item"],
+      "attributes": {
+        "facs": {
+          "type": "string",
+          "required": false
+        },
+        "n": {
+          "type": "string",
+          "required": false
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": true
+    },
+    "lb": {
+      "allowedChildren": [],
+      "allowedParents": ["p", "head", "note", "cell", "item", "div", "hi", "fw"],
+      "attributes": {
+        "break": {
+          "type": "string",
+          "required": false,
+          "values": ["no"]
+        },
+        "n": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": true
+    },
+    "fw": {
+      "allowedChildren": ["#text", "lb", "hi", "pb"],
+      "allowedParents": ["body", "div", "p"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false,
+          "values": ["header", "footer", "pageNum", "sig", "catch"]
+        },
+        "place": {
+          "type": "string",
+          "required": false,
+          "values": ["top", "bottom"]
+        }
+      },
+      "selfClosing": false
+    },
+    "note": {
+      "allowedChildren": [
+        "#text", "p", "lb", "hi", "persName", "placeName", "orgName", "name",
+        "date", "bibl", "ref", "foreign", "pb"
+      ],
+      "allowedParents": ["p", "div", "body", "head", "cell", "item"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "place": {
+          "type": "string",
+          "required": false,
+          "values": ["foot", "end", "margin", "inline"]
+        },
+        "n": {
+          "type": "string",
+          "required": false
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "table": {
+      "allowedChildren": ["row", "head"],
+      "allowedParents": ["div", "body", "p", "note"],
+      "attributes": {
+        "rows": {
+          "type": "string",
+          "required": false
+        },
+        "cols": {
+          "type": "string",
+          "required": false
+        },
+        "rendition": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "row": {
+      "allowedChildren": ["cell"],
+      "allowedParents": ["table"],
+      "attributes": {
+        "role": {
+          "type": "string",
+          "required": false,
+          "values": ["label", "data"]
+        },
+        "n": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "cell": {
+      "allowedChildren": [
+        "#text", "p", "lb", "pb", "hi", "persName", "placeName", "orgName",
+        "name", "date", "bibl", "ref", "note", "figure", "list"
+      ],
+      "allowedParents": ["row"],
+      "attributes": {
+        "role": {
+          "type": "string",
+          "required": false,
+          "values": ["label", "data"]
+        },
+        "cols": {
+          "type": "string",
+          "required": false
+        },
+        "rows": {
+          "type": "string",
+          "required": false
+        },
+        "rendition": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "list": {
+      "allowedChildren": ["item", "head"],
+      "allowedParents": ["div", "body", "p", "note", "cell"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false,
+          "values": ["ordered", "bulleted", "simple", "gloss"]
+        },
+        "rendition": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "item": {
+      "allowedChildren": [
+        "#text", "p", "lb", "pb", "hi", "persName", "placeName", "orgName",
+        "name", "date", "bibl", "ref", "note", "list", "figure"
+      ],
+      "allowedParents": ["list"],
+      "attributes": {
+        "n": {
+          "type": "string",
+          "required": false
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "persName": {
+      "allowedChildren": ["#text", "name", "hi", "foreign"],
+      "allowedParents": ["p", "head", "note", "cell", "item", "author", "editor", "title", "origPlace"],
+      "attributes": {
+        "ref": {
+          "type": "string",
+          "required": false
+        },
+        "key": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "placeName": {
+      "allowedChildren": ["#text", "name", "hi", "foreign"],
+      "allowedParents": ["p", "head", "note", "cell", "item", "origPlace", "title"],
+      "attributes": {
+        "ref": {
+          "type": "string",
+          "required": false
+        },
+        "key": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "orgName": {
+      "allowedChildren": ["#text", "name", "hi", "foreign"],
+      "allowedParents": ["p", "head", "note", "cell", "item", "publisher"],
+      "attributes": {
+        "ref": {
+          "type": "string",
+          "required": false
+        },
+        "key": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "name": {
+      "allowedChildren": ["#text", "hi", "foreign"],
+      "allowedParents": ["p", "head", "note", "cell", "item", "author", "editor", "publisher", "persName", "placeName", "orgName", "change", "title"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "ref": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "bibl": {
+      "allowedChildren": ["#text", "title", "author", "date", "hi", "ref", "persName", "placeName", "name"],
+      "allowedParents": ["p", "div", "note", "cell", "item", "sourceDesc"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "term": {
+      "allowedChildren": ["#text", "hi", "foreign"],
+      "allowedParents": ["p", "head", "note", "cell", "item"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "ref": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "measure": {
+      "allowedChildren": ["#text", "hi"],
+      "allowedParents": ["p", "head", "note", "cell", "item"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "quantity": {
+          "type": "string",
+          "required": false
+        },
+        "unit": {
+          "type": "string",
+          "required": false
+        },
+        "confidence": {
+          "type": "string",
+          "required": false,
+          "values": ["high", "medium", "low"]
+        },
+        "resp": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "foreign": {
+      "allowedChildren": ["#text", "hi", "persName", "placeName", "name"],
+      "allowedParents": ["p", "head", "note", "cell", "item", "term", "name", "persName", "placeName", "orgName"],
+      "attributes": {
+        "xml:lang": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "selfClosing": false
+    },
+    "hi": {
+      "allowedChildren": ["#text", "lb", "persName", "placeName", "orgName", "name", "date", "ref", "foreign"],
+      "allowedParents": [
+        "p", "head", "note", "cell", "item", "title", "author", "editor",
+        "fw", "persName", "placeName", "orgName", "name", "term", "measure",
+        "bibl", "foreign", "figDesc"
+      ],
+      "attributes": {
+        "rendition": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "selfClosing": false
+    },
+    "ref": {
+      "allowedChildren": ["#text", "hi", "persName", "placeName", "name"],
+      "allowedParents": ["p", "head", "note", "cell", "item", "bibl", "licence", "publisher"],
+      "attributes": {
+        "target": {
+          "type": "string",
+          "required": true
+        },
+        "type": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "figure": {
+      "allowedChildren": ["graphic", "figDesc", "head", "p"],
+      "allowedParents": ["div", "body", "p", "cell", "item", "note"],
+      "attributes": {
+        "type": {
+          "type": "string",
+          "required": false
+        },
+        "xml:id": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": false
+    },
+    "figDesc": {
+      "allowedChildren": ["#text", "hi"],
+      "allowedParents": ["figure"],
+      "attributes": {},
+      "selfClosing": false
+    },
+    "graphic": {
+      "allowedChildren": [],
+      "allowedParents": ["figure"],
+      "attributes": {
+        "url": {
+          "type": "string",
+          "required": true
+        },
+        "width": {
+          "type": "string",
+          "required": false
+        },
+        "height": {
+          "type": "string",
+          "required": false
+        },
+        "mimeType": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "selfClosing": true
+    }
+  }
+}
