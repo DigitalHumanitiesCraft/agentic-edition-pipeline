@@ -2,7 +2,7 @@
 
 This repository is a forkable template for AI-assisted digital scholarly editions. Claude Code operates the pipeline, the human is the Critical Expert in the Loop.
 
-Read `knowledge/00_INDEX.md` first. It maps which knowledge documents are relevant for each pipeline step.
+**Session start.** Read `knowledge/00_INDEX.md` first. It maps which knowledge documents are relevant for each pipeline step. If `knowledge/01_PROJECT.md` still contains `[TODO]` placeholders, read `SETUP.md` and walk the human through the configuration points before touching any pipeline script.
 
 ## Rules (violations are bugs)
 
@@ -52,11 +52,11 @@ Proceed only after explicit approval.
 
 Seven steps with verification checkpoints. NEVER skip a checkpoint.
 
-### Step 1 Image extraction
+### Step 1 Source preparation
 
-Only when PDFs exist in `data/sources/pdf/`.
+Organise source material into one image directory per document. The script only converts PDFs; image files (JPEG, PNG, TIFF) go directly into `data/sources/images/{doc_id}/` and are picked up by steps 2 and 3 without conversion. Record object-level metadata (title, date, rights) in `knowledge/02_DATA.md`.
 
-- **Script** `pipeline/01_extract_images.py`
+- **Script** `pipeline/01_extract_images.py` (only when PDFs exist in `data/sources/pdf/`)
 - **Reads** `data/sources/pdf/`
 - **Writes** `data/processed/images/`
 - **Context** `knowledge/02_DATA.md`
@@ -99,11 +99,11 @@ Start with a sample (5-10 objects), not the full corpus.
 - **Writes** `data/processed/tei/{object_id}.xml`, `results/tei/{object_id}.xml`
 - **Context** `knowledge/03_CONTEXT.md`, `knowledge/04_TEI_MAPPING.md`
 - **Prompt** `pipeline/prompts/annotation.md`
-- **Schema** `schemas/dtabf.json`
+- **Schemas** `schemas/dtabf.json` (encoding profile for generation), `schemas/basisformat.rng` (RelaxNG validation); roles and commands in `schemas/README.md`
 
 Start with a sample, then full corpus.
 
-**CHECKPOINT** Present 2-3 generated TEI files. Verify annotation correctness, mapping accuracy, schema validation. If adjustment is needed, update `knowledge/04_TEI_MAPPING.md` and the prompt, then repeat the sample.
+**CHECKPOINT** Present 2-3 generated TEI files. Verify annotation correctness, mapping accuracy, and RelaxNG validation against `schemas/basisformat.rng` (command in `schemas/README.md`). If adjustment is needed, update `knowledge/04_TEI_MAPPING.md` and the prompt, then repeat the sample.
 
 ### Step 5b Requirements engineering and design
 

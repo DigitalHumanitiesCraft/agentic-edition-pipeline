@@ -8,6 +8,8 @@ tags: [index, navigation]
 
 Einstiegspunkt fuer Claude Code und Menschen. Dieses Verzeichnis ist die Promptotyping-Wissensbasis des Editionsprojekts. Claude Code liest zuerst dieses Dokument, dann die fuer den aktuellen Arbeitsschritt relevanten Dokumente.
 
+Wenn die Dokumente 01–04 noch ungefuellte `[TODO]`-Felder enthalten, ist das Repository noch nicht fuer ein konkretes Editionsprojekt instantiiert. In diesem Fall `SETUP.md` im Projektstamm lesen und mit dem Menschen gemeinsam die Konfigurationspunkte abarbeiten, bevor Pipeline-Skripte ausgefuehrt werden.
+
 ## Dokumente
 
 | Dokument | Inhalt | Wer fuellt aus | Wann relevant |
