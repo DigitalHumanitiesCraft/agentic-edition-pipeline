@@ -31,7 +31,15 @@
       return r.json();
     }).then(function (d) {
       if (Array.isArray(d)) { state.catalog = d; }
-      else { state.projectTitle = d.projectTitle || null; state.catalog = d.items || []; }
+      else {
+        // 06_build_frontend.py writes {project, objects, ...}; older data
+        // used {projectTitle, items}. Accept both shapes.
+        state.projectTitle = d.projectTitle || d.project || null;
+        state.catalog = d.items || d.objects || [];
+      }
+      state.catalog.forEach(function (o) {
+        if (o.pages == null && o.page_count != null) o.pages = o.page_count;
+      });
       if (state.projectTitle) { titleEl.textContent = state.projectTitle; document.title = state.projectTitle; }
     });
   }

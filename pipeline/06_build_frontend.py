@@ -15,6 +15,7 @@ import argparse
 import http.server
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -23,10 +24,11 @@ from lxml import etree
 from config import (
     DOCS_DATA_DIR,
     DOCS_DIR,
-    IMAGES_DIR,
     RESULTS_TEI_DIR,
     ensure_dirs,
+    list_page_images,
     read_knowledge,
+    resolve_image_dir,
 )
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -108,15 +110,46 @@ def _strip_tags(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+def _normalize_page_text(chunk: str) -> str:
+    """Turn a serialized TEI chunk into display text.
+
+    <lb/> becomes a line break, </p> a paragraph break. The indentation
+    whitespace that pretty-printed TEI carries into text nodes is stripped
+    per line, and blank-line runs collapse to one paragraph separator.
+    """
+    chunk = re.sub(r"<lb\s*/>", "\n", chunk)
+    chunk = re.sub(r"</p>", "\n\n", chunk)
+    text = _strip_tags(chunk)
+    lines = [ln.strip() for ln in text.split("\n")]
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def extract_facsimile_urls(root: etree._Element) -> dict[str, str]:
+    """Map '#xml:id' references to remote URLs from the <facsimile> block."""
+    urls: dict[str, str] = {}
+    xml_id = "{http://www.w3.org/XML/1998/namespace}id"
+    for graphic in root.findall(f".//{{{TEI_NS}}}facsimile/{{{TEI_NS}}}graphic"):
+        gid = graphic.get(xml_id, "")
+        url = graphic.get("url", "")
+        if gid and url:
+            urls[f"#{gid}"] = url
+    return urls
+
+
 def extract_pages(root: etree._Element) -> list[dict]:
     """Split body content by <pb/> elements into per-page text chunks.
 
     Each page gets the plain text between its <pb/> and the next <pb/>
-    (or end of body). Image paths come from the facs attribute on <pb/>.
+    (or end of body). Image references come from the facs attribute on
+    <pb/>; a '#facs_N' pointer resolves to the <facsimile> graphic URL.
     """
     body = root.find(f".//{{{TEI_NS}}}body")
     if body is None:
         return []
+
+    facs_urls = extract_facsimile_urls(root)
 
     # Serialize body to string so we can split on <pb/> reliably.
     # This avoids complex tree walking for mixed-content elements.
@@ -130,27 +163,21 @@ def extract_pages(root: etree._Element) -> list[dict]:
     current_n = ""
 
     for part in parts:
-        pb_match = re.match(r'<pb\s[^>]*n="(\d+)"[^>]*(?:facs="([^"]*)")?[^>]*/>', part)
-        if not pb_match:
-            # Also try facs before n
-            pb_match = re.match(r'<pb\s[^>]*facs="([^"]*)"[^>]*n="(\d+)"[^>]*/>', part)
-            if pb_match:
-                current_facs = pb_match.group(1)
-                current_n = pb_match.group(2)
-                continue
-
-        if pb_match:
-            current_n = pb_match.group(1)
-            current_facs = pb_match.group(2) or ""
+        if re.match(r"<pb\s", part):
+            # Attribute order varies; search each attribute independently.
+            n_match = re.search(r'\bn="(\d+)"', part)
+            facs_match = re.search(r'\bfacs="([^"]*)"', part)
+            current_n = n_match.group(1) if n_match else ""
+            current_facs = facs_match.group(1) if facs_match else ""
             continue
 
         # This is a text chunk belonging to the current page
         if current_n:
-            text = _strip_tags(part).strip()
+            facs = facs_urls.get(current_facs, current_facs)
             pages.append({
                 "page": int(current_n),
-                "text": text,
-                "image": current_facs,
+                "text": _normalize_page_text(part),
+                "image": facs,
             })
 
     return pages
@@ -159,6 +186,33 @@ def extract_pages(root: etree._Element) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Build data files
 # ---------------------------------------------------------------------------
+
+def _attach_images(object_id: str, pages: list[dict]):
+    """Resolve page images and make them servable from docs/.
+
+    Remote URLs (from <facsimile> graphic url) are kept as-is; the viewer
+    renders them directly. Local images resolved via the shared image-root
+    resolver are copied to docs/images/{id}/ because the static frontend
+    can only serve files below docs/. Page order maps local files to pages.
+    """
+    image_dir = resolve_image_dir(object_id)
+    local_files = list_page_images(image_dir) if image_dir else []
+    docs_image_dir = DOCS_DIR / "images" / object_id
+
+    for i, page in enumerate(pages):
+        current = page.get("image", "")
+        if current.startswith("http://") or current.startswith("https://"):
+            continue
+        if i < len(local_files):
+            src = local_files[i]
+            docs_image_dir.mkdir(parents=True, exist_ok=True)
+            dst = docs_image_dir / src.name
+            if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime:
+                shutil.copy2(src, dst)
+            page["image"] = f"images/{object_id}/{src.name}"
+        else:
+            page["image"] = ""
+
 
 def process_tei(tei_path: Path) -> dict | None:
     """Parse a TEI file and return its data dict, or None on error."""
@@ -173,16 +227,10 @@ def process_tei(tei_path: Path) -> dict | None:
     meta = extract_metadata(root)
     pages = extract_pages(root)
 
-    # Check for images on disk
-    image_dir = IMAGES_DIR / object_id
-    has_images = image_dir.is_dir() and any(image_dir.glob("*.png"))
-
-    # If images exist, resolve paths relative to docs/ for the viewer
-    if has_images:
-        for page in pages:
-            if not page.get("image"):
-                page_num = page.get("page", 0)
-                page["image"] = f"images/{object_id}/{object_id}_p{page_num:03d}.png"
+    _attach_images(object_id, pages)
+    # has_images reflects what the viewer can actually show: a copied local
+    # file or a remote facsimile URL on at least one page.
+    has_images = any(p.get("image") for p in pages)
 
     return {
         "id": object_id,

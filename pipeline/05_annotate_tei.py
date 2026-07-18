@@ -25,7 +25,6 @@ from pathlib import Path
 from config import (
     ANNOTATION_MODEL,
     ANNOTATION_PROVIDER,
-    IMAGES_DIR,
     RESULTS_REPORTS_DIR,
     RESULTS_TEI_DIR,
     TEI_DIR,
@@ -33,6 +32,7 @@ from config import (
     VALIDATED_DIR,
     ensure_dirs,
     load_prompt,
+    missing_api_key,
     provenance_meta,
     read_knowledge,
     write_errors,
@@ -84,6 +84,8 @@ def _extract_project_info(md_text: str) -> dict:
             info["license"] = val
         elif "sprache" in key or "language" in key or "lang" in key:
             info["language"] = val
+        elif "editionstyp" in key or "edition type" in key:
+            info["edition_type"] = val
 
     # Fallback: first heading
     if "title" not in info:
@@ -158,28 +160,108 @@ def _build_tei_header(
     return "\n".join(lines)
 
 
-def _build_body(pages: list[dict], object_id: str) -> str:
-    """Build <text><body>...</body></text> from transcription pages."""
+def _build_facsimile(pages: list[dict], doc_meta: dict) -> tuple[str, dict]:
+    """Build a <facsimile> block from remote image URLs in the metadata.
+
+    metadata.image_urls maps page numbers (JSON keys, as strings) to URLs;
+    a plain list aligned with page order is also accepted. Returns the XML
+    string (empty when no URLs exist) and a page-number to xml:id map.
+    """
+    urls = doc_meta.get("image_urls")
+    entries: list[tuple[int, str]] = []
+
+    if isinstance(urls, dict):
+        for p in pages:
+            key = str(p.get("page", ""))
+            if urls.get(key):
+                entries.append((p.get("page", 0), urls[key]))
+    elif isinstance(urls, list):
+        for i, p in enumerate(pages):
+            if i < len(urls) and urls[i]:
+                entries.append((p.get("page", i + 1), urls[i]))
+
+    if not entries:
+        return "", {}
+
+    facs_ids: dict[int, str] = {}
+    lines = ["  <facsimile>"]
+    for page_num, url in entries:
+        fid = f"facs_{page_num}"
+        facs_ids[page_num] = fid
+        lines.append(f'    <graphic xml:id="{fid}" url="{_esc(url)}"/>')
+    lines.append("  </facsimile>")
+    return "\n".join(lines), facs_ids
+
+
+def _paragraph_xml(para: str, diplomatic: bool) -> str:
+    """Render one paragraph, keeping line breaks as <lb/> for diplomatic editions."""
+    if diplomatic:
+        lines = [_esc(ln.strip()) for ln in para.split("\n") if ln.strip()]
+        return "<lb/>".join(lines)
+    return _esc(re.sub(r"\s*\n\s*", " ", para).strip())
+
+
+def _build_body(pages: list[dict], object_id: str, facs_ids: dict, diplomatic: bool) -> str:
+    """Build <text><body>...</body></text> from transcription pages.
+
+    Page-level fields evaluated here (data contract):
+      page_type "blank"               -- declared empty page, pb only
+      page_type "foreign_text"        -- text of another author, kept out of
+                                         the edited body as <note type="foreign">
+      page_type "gate_low_resolution" -- image quality gate, marked with a note
+      foreign_paragraphs [indices]    -- 0-based paragraph indices excluded as
+                                         foreign on an otherwise edited page
+    """
     body_lines = ["  <text>", "    <body>", "      <div>"]
 
     for p in pages:
         page_num = p.get("page", 0)
         text = p.get("transcription", "")
+        page_type = p.get("page_type", "")
+        notes = p.get("notes", "")
 
-        # Page break element with facs pointer
-        facs = f"images/{object_id}/{object_id}_p{page_num:03d}.png"
+        # Page break: point to the facsimile graphic when one exists,
+        # otherwise to the conventional local image path.
+        if page_num in facs_ids:
+            facs = f"#{facs_ids[page_num]}"
+        else:
+            facs = f"images/{object_id}/{object_id}_p{page_num:03d}.png"
         body_lines.append(f'        <pb n="{page_num}" facs="{facs}"/>')
 
-        # Skip blank pages
-        if not text.strip():
+        if page_type == "foreign_text":
+            if text.strip():
+                body_lines.append(
+                    f'        <note type="foreign">{_esc(text.strip())}</note>'
+                )
             continue
 
-        # Split on double newlines into paragraphs
+        if page_type == "gate_low_resolution":
+            reason = notes.strip() or "Image resolution insufficient for diplomatic transcription."
+            body_lines.append(
+                f'        <note type="gate" subtype="low_resolution">{_esc(reason)}</note>'
+            )
+            # Structure-only transcription (if any) still enters the body below.
+
+        if not text.strip():
+            # Distinguish a declared blank page from an undeclared empty entry,
+            # so verification can tell a real blank from a silent merge gap.
+            if page_type not in ("blank", "gate_low_resolution"):
+                body_lines.append(
+                    '        <note type="empty">Empty page without declared page_type; '
+                    "verify against the facsimile.</note>"
+                )
+            continue
+
+        foreign_idx = set(p.get("foreign_paragraphs", []))
         paragraphs = re.split(r"\n{2,}", text.strip())
-        for para in paragraphs:
-            escaped = _esc(para.strip())
-            if escaped:
-                body_lines.append(f"        <p>{escaped}</p>")
+        for idx, para in enumerate(paragraphs):
+            content = _paragraph_xml(para, diplomatic)
+            if not content:
+                continue
+            if idx in foreign_idx:
+                body_lines.append(f'        <note type="foreign">{content}</note>')
+            else:
+                body_lines.append(f"        <p>{content}</p>")
 
     body_lines += ["      </div>", "    </body>", "  </text>"]
     return "\n".join(body_lines)
@@ -196,17 +278,24 @@ def generate_tei(object_id: str, data: dict, project: dict) -> str:
     model = meta.get("model", "deterministic")
     prompt_template = meta.get("prompt_template", "")
 
-    header = _build_tei_header(object_id, doc_meta, project, language, model, prompt_template)
-    body = _build_body(pages, object_id)
+    # Line breaks are meaning-bearing in a diplomatic transcription; only a
+    # declared normalised edition type joins lines with spaces.
+    edition_type = project.get("edition_type", "").lower()
+    diplomatic = "normalis" not in edition_type
 
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<TEI xmlns="http://www.tei-c.org/ns/1.0">\n'
-        f"{header}\n"
-        f"{body}\n"
-        "</TEI>\n"
-    )
-    return xml
+    header = _build_tei_header(object_id, doc_meta, project, language, model, prompt_template)
+    facsimile, facs_ids = _build_facsimile(pages, doc_meta)
+    body = _build_body(pages, object_id, facs_ids, diplomatic)
+
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0">',
+        header,
+    ]
+    if facsimile:
+        parts.append(facsimile)
+    parts += [body, "</TEI>", ""]
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +495,19 @@ def main():
     project = _extract_project_info(project_md)
 
     use_llm = not args.no_llm
+
+    # Fail fast when LLM enrichment is requested but its key is missing.
+    # Deterministic mode (empty ANNOTATION_PROVIDER or --no-llm) needs no key.
+    if use_llm and ANNOTATION_PROVIDER:
+        missing = missing_api_key(ANNOTATION_PROVIDER)
+        if missing:
+            print(
+                f"ERROR: no API key configured, this step requires one. "
+                f"Set {missing} in .env for provider '{ANNOTATION_PROVIDER}', "
+                f"or run with --no-llm for deterministic TEI generation.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     objects = collect_objects(args.object, args.all, args.sample)
 
     mode = "validate-only" if args.validate_only else "deterministic"
