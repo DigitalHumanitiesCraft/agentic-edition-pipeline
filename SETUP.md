@@ -147,9 +147,11 @@ The pipeline ships with two schema files, documented in detail in `schemas/READM
 - `schemas/dtabf.json` — JSON abstraction of DTABf structural constraints, used as schema guidance for the LLM annotation prompt. Not a validation schema.
 - `schemas/basisformat.rng` — official DTA-Basisformat RelaxNG schema (CC BY-SA 3.0 DE, Deutsches Textarchiv), used for full conformance validation of generated TEI before publication. For manuscript corpora, download the manuscript variant from https://www.deutschestextarchiv.de/basisformat_ms.rng instead.
 
-DTABf is the default TEI profile for historical German-language texts. If your project uses a different TEI profile:
+Choosing the validation target is part of setting up a fork (ADR-005): different projects need different schemata, and the template prescribes none. DTABf is the shipped example profile for historical German-language texts; TEI All is the permissive starting point that the deterministic output passes out of the box; a project ODD/RNG is the strict end. The options and their trade-offs, including the header caveat for strict DTABf, are laid out in `schemas/README.md`.
 
-1. Replace `schemas/basisformat.rng` with your profile's RelaxNG schema.
+To set or change the target:
+
+1. Put your profile's RelaxNG schema into `schemas/` and point `VALIDATION_SCHEMA` in `pipeline/config.py` at it. Check conformance with `python pipeline/validate_schema.py`.
 2. Adjust or replace `schemas/dtabf.json` so the annotation guidance matches the new element set.
 3. Update `knowledge/04_TEI_MAPPING.md` to match the new profile.
 4. Record the decision in `knowledge/decisions.md`.

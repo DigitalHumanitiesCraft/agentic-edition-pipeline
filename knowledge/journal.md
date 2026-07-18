@@ -34,3 +34,10 @@ Protokoll jeder Arbeitssession. Claude Code traegt hier am Ende jeder Session Da
 **Ergebnis:** Test-Nachlauf 14/14 gruen, Commits und Umbenennungen bestaetigt. Die RelaxNG-Pruefung eines generierten TEI gegen `schemas/basisformat.rng` schlaegt fehl, allerdings an vorbestehenden Header-Strukturen (title-Attribute, `projectDesc`, `revisionDesc`, `facsimile` an dieser Position werden vom strengen Basisformat nicht akzeptiert), nicht an den neuen note-Typen. Das deterministische TEI war demnach nie streng DTABf-valide; es ist wohlgeformtes TEI, das sich am Basisformat orientiert.
 **Probleme:** Keine neuen; der Befund ist eine Praezisierung der in `schemas/README.md` angelegten Rollentrennung zwischen Encoding-Profil und Validierung.
 **Naechste Schritte:** Entscheiden, ob der deterministische Modus TEI-All als Validierungsziel deklariert (Doku-Aenderung) oder der Header auf strenge Basisformat-Konformitaet gezogen wird (Code-Aenderung); bis dahin gilt die Orientierungs-Formulierung.
+
+### 2026-07-18 Validierungsziel konfigurierbar gemacht (ADR-005)
+
+**Ziel:** Den offenen Validierungsziel-Entscheid umsetzen; Operator-Entscheid: das Schema muss projektweise waehlbar sein.
+**Ergebnis:** `VALIDATION_SCHEMA` in `pipeline/config.py` als einzige Konfigurationsstelle; `pipeline/validate_schema.py` als lauffaehiger Pruefer (klare Meldung bei fehlendem Schema, Datei-Report, Exit-Code); drei neue Tests (17/17 gruen). Empirisch belegt: alle vier zbz-Testlauf-TEI sind TEI-All-valide, der DTABf-Fehlschlag reproduziert exakt an den Header-Strukturen aus dem Vortagesbefund. schemas/README.md und SETUP.md Abschnitt 6 auf die Projektentscheidung umgestellt, DTABf als Beispielprofil mit Header-Caveat. ADR-005.
+**Probleme:** Keine.
+**Naechste Schritte:** Ersten Produktiv-Fork aufsetzen; dort das Validierungsziel explizit setzen und den Header bei Bedarf profilkonform ziehen.

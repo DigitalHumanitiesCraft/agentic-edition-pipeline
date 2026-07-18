@@ -53,3 +53,11 @@ Dokumentation aller Architektur- und Designentscheidungen im ADR-Format. Claude 
 **Entscheidung:** Umbenennung auf `journal.md` und `decisions.md`. Die Lesereihenfolge stellt die Tabelle in [[00_INDEX]] her, nicht das Dateipraefix.
 **Begruendung:** Ein Name pro Rolle; die Konvention ist die aeltere und breitere Quelle der Wahrheit.
 **Alternativen:** Deklaration der nummerierten Namen als bewusste Abweichung verworfen, weil sie den Konflikt nur dokumentiert statt beseitigt.
+
+### ADR-005 Validierungsziel ist eine Projektentscheidung
+
+**Datum:** 2026-07-18
+**Kontext:** Die Leitstellen-Strengpruefung zeigte, dass das deterministisch erzeugte TEI an vorbestehenden Header-Strukturen der DTABf-RNG scheitert (title-Attribute, projectDesc, revisionDesc, facsimile-Position), nicht an den neuen note-Typen. Das Template behauptete implizit DTABf als Validierungsziel, ohne es zu erfuellen. Gegen TEI All validieren alle vier zbz-Testlauf-TEI fehlerfrei (geprueft 2026-07-18).
+**Entscheidung:** Das Validierungsziel ist eine Entscheidung des jeweiligen Fork-Projekts, kein Template-Default. Unterschiedliche Projekte brauchen unterschiedliche Schemata (Operator-Entscheid 2026-07-18). Der Fork setzt `VALIDATION_SCHEMA` in `pipeline/config.py` (TEI All, DTABf, eigenes RNG/ODD); `pipeline/validate_schema.py` prueft dagegen. Die DTABf-Dateien bleiben als ausgearbeitetes Beispielprofil im Template, mit dokumentiertem Header-Caveat fuer den strengen Fall.
+**Begruendung:** Die beiden urspruenglichen Optionen (TEI All hart dokumentieren oder den Header streng DTABf ziehen) haetten je eine Projektklasse schlechter bedient; die Konfigurierbarkeit loest beide Faelle und macht das behauptete Ziel pruefbar statt implizit.
+**Alternativen:** Header streng DTABf-konform ziehen verworfen als alleinige Loesung (bindet alle Forks an ein Profil, das nicht alle brauchen); TEI All als einziges deklariertes Ziel verworfen (verliert die Strenge fuer Projekte, die ein Profil pflegen).

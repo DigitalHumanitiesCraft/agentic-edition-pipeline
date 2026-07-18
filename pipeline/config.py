@@ -32,6 +32,12 @@ SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 DOCS_DIR = PROJECT_ROOT / "docs"
 DOCS_DATA_DIR = DOCS_DIR / "data"
 
+# --- TEI validation target (ADR-005) ---
+# Per-fork choice: point this at the RelaxNG schema your project validates
+# against (TEI All, DTABf, or your own RNG; see schemas/README.md).
+# Checked by pipeline/validate_schema.py.
+VALIDATION_SCHEMA = SCHEMAS_DIR / "basisformat.rng"
+
 # --- API keys ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
