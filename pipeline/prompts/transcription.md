@@ -21,16 +21,24 @@ Follow these rules exactly.
 8. Handwritten and printed text. Transcribe both equally. If a page contains both, note which portions are handwritten and which are printed in the notes field.
 9. Bleed-through. Do NOT transcribe text that bleeds through from the reverse side of the page. If bleed-through interferes with legibility, note it.
 
-Empty pages. If a page contains no text (blank, colour chart, calibration target, separator sheet), set the transcription to an empty string and describe the page content in the notes field.
+Page classification. Besides its transcription, a page may carry a page_type field. Omit it for normal content pages. Use exactly these values.
 
-Return your result as a JSON object with the following structure.
+- "blank" — The page contains no text (blank, colour chart, calibration target, separator sheet). Set the transcription to an empty string and describe the page content in the notes field.
+- "gate_low_resolution" — The image quality is insufficient for a faithful transcription of the running text as a whole (not just single words). Do NOT guess. Transcribe only the structural elements you can read with certainty (title, author line, headings, printed page numbers) or leave the transcription empty, and state in the notes field why the page cannot be transcribed.
+- "foreign_text" — The entire page belongs to a different text or author than the object being edited (e.g. the following article in a journal). Transcribe it normally; downstream processing keeps it out of the edited text body.
+
+Mixed pages. When a content page contains both text of the edited object and text of another author (e.g. the end of one article and the start of the next), transcribe everything, separate the parts into their own paragraphs (blank line between paragraphs), and list the 0-based indices of the foreign paragraphs in a foreign_paragraphs field on that page.
+
+Return your result as a JSON object with the following structure. This is the pipeline data contract: pages at the top level, the page text under the key "transcription" (see knowledge/08_DATA_CONTRACT.md).
 
 {
   "pages": [
     {
       "page": 1,
       "transcription": "...",
-      "notes": "..."
+      "notes": "...",
+      "page_type": "blank | gate_low_resolution | foreign_text (omit for normal content pages)",
+      "foreign_paragraphs": [2]
     }
   ],
   "confidence": "high | medium | low",

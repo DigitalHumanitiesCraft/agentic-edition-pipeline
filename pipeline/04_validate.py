@@ -27,6 +27,7 @@ from config import (
     VALIDATION_PROVIDER,
     ensure_dirs,
     load_prompt,
+    missing_api_key,
     provenance_meta,
     write_errors,
 )
@@ -166,11 +167,17 @@ def compute_overall_status(
     rules: list[dict],
     quality_signals: dict | None,
     llm_pages: list[dict] | None,
+    gate_pages: int = 0,
 ) -> str:
     """Derive a single status from all validation signals.
 
     Priority order (highest to lowest):
       problematic > needs_review > confident
+
+    The needs_review quality signal means "unverified transcription", not
+    "serious reading errors" -- it maps to needs_review, never problematic.
+    Pages gated as not transcribable (page_type gate_low_resolution) also
+    cap the status at needs_review so the data gap stays visible.
     """
     error_count = sum(1 for r in rules if r["severity"] == "error")
     warning_count = sum(1 for r in rules if r["severity"] == "warning")
@@ -192,9 +199,9 @@ def compute_overall_status(
                 llm_likely = True
 
     # Decision tree
-    if llm_uncertain or needs_review_from_signals or error_count > 2:
+    if llm_uncertain or error_count > 2:
         return "problematic"
-    if llm_likely or warning_count > 0:
+    if llm_likely or warning_count > 0 or needs_review_from_signals or gate_pages > 0:
         return "needs_review"
     return "confident"
 
@@ -222,6 +229,7 @@ def validate_one(object_id: str, use_llm: bool, force: bool) -> dict | None:
 
     pages = data.get("pages", [])
     quality_signals = data.get("quality_signals", None)
+    gate_pages = sum(1 for p in pages if p.get("page_type") == "gate_low_resolution")
 
     # Phase 1: deterministic
     rules, per_page_stats = run_deterministic(pages)
@@ -235,9 +243,10 @@ def validate_one(object_id: str, use_llm: bool, force: bool) -> dict | None:
         prompt_template = load_prompt(prompt_template_name)
         llm_results = run_llm_judge(pages, prompt_template)
 
-    overall = compute_overall_status(rules, quality_signals, llm_results)
+    overall = compute_overall_status(rules, quality_signals, llm_results, gate_pages)
 
-    # Build output -- keep the original data and add validation block
+    # Build output -- keep the original data and add validation block.
+    # metadata is passed through unchanged (data contract, steps 3-6).
     output = {
         "_meta": provenance_meta(
             script="04_validate.py",
@@ -247,6 +256,7 @@ def validate_one(object_id: str, use_llm: bool, force: bool) -> dict | None:
             step=4,
         ),
         "object_id": object_id,
+        "metadata": data.get("metadata", {}),
         "pages": pages,
         "validation": {
             "rules": rules,
@@ -299,6 +309,20 @@ def main():
 
     ensure_dirs()
     use_llm = not args.no_llm
+
+    # Fail fast when the LLM judge is requested but its key is missing.
+    # Deterministic-only mode (empty VALIDATION_PROVIDER or --no-llm) needs no key.
+    if use_llm and VALIDATION_PROVIDER:
+        missing = missing_api_key(VALIDATION_PROVIDER)
+        if missing:
+            print(
+                f"ERROR: no API key configured, this step requires one. "
+                f"Set {missing} in .env for provider '{VALIDATION_PROVIDER}', "
+                f"or run with --no-llm for deterministic validation.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     objects = collect_objects(args.object, args.all)
 
     mode = "deterministic only" if not use_llm or not VALIDATION_PROVIDER else f"deterministic + LLM ({VALIDATION_PROVIDER}/{VALIDATION_MODEL})"

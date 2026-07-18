@@ -22,14 +22,15 @@ from config import (
     BATCH_DELAY,
     CHUNK_SIZE,
     DATA_DIR,
-    IMAGES_DIR,
-    SOURCES_DIR,
     TRANSCRIPTIONS_DIR,
     TRANSCRIPTION_MODEL,
     TRANSCRIPTION_PROVIDER,
     ensure_dirs,
+    list_page_images,
     load_prompt,
+    missing_api_key,
     provenance_meta,
+    resolve_image_dir,
     write_errors,
 )
 from llm import call_llm, parse_json_response
@@ -42,33 +43,25 @@ INVENTORY_PATH = DATA_DIR / "inventory.json"
 # ---------------------------------------------------------------------------
 
 def find_images_for_document(doc: dict) -> list[Path]:
-    """Locate page images for a document entry from the inventory.
+    """Locate page images for a document via the shared image-root resolver.
 
-    Checks extracted images first (data/processed/images/{id}/), then falls
-    back to source images (data/sources/images/{id}/). Returns sorted list.
+    Resolution order (config.resolve_image_dir): data/sources/images/{id}/
+    first, then data/processed/images/{id}/. When an extraction manifest
+    exists it defines page order; otherwise images sort by filename.
     """
-    extracted_dir = IMAGES_DIR / doc["id"]
-    if extracted_dir.is_dir():
-        # If a manifest exists, use its ordering; otherwise glob PNGs
-        manifest_path = extracted_dir / "manifest.json"
-        if manifest_path.exists():
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                return [extracted_dir / p["filename"] for p in manifest["pages"]
-                        if "error" not in p and (extracted_dir / p["filename"]).exists()]
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return sorted(extracted_dir.glob("*.png"))
+    image_dir = resolve_image_dir(doc["id"])
+    if image_dir is None:
+        return []
 
-    source_dir = SOURCES_DIR / "images" / doc["id"]
-    if source_dir.is_dir():
-        # Accept common image formats
-        images = []
-        for ext in ("*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff"):
-            images.extend(source_dir.glob(ext))
-        return sorted(images)
-
-    return []
+    manifest_path = image_dir / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return [image_dir / p["filename"] for p in manifest["pages"]
+                    if "error" not in p and (image_dir / p["filename"]).exists()]
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return list_page_images(image_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -131,17 +124,34 @@ def merge_chunks(chunks: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_quality_signals(transcription: dict, image_count: int) -> dict:
+    """Derive quality signals from the page array (data contract key: transcription).
+
+    A page-level page_type declared by the model (blank, foreign_text,
+    gate_low_resolution) takes precedence over the character-count inference.
+    """
     pages = transcription.get("pages", [])
 
     total_chars = 0
     blank_pages = 0
+    gate_pages = 0
+    foreign_pages = 0
     page_types: list[str] = []
 
     for page in pages:
-        text = page.get("text", "")
+        text = page.get("transcription", "")
         char_count = len(text.strip())
         total_chars += char_count
-        if char_count < 10:
+
+        declared = page.get("page_type", "")
+        if declared:
+            page_types.append(declared)
+            if declared == "blank":
+                blank_pages += 1
+            elif declared == "gate_low_resolution":
+                gate_pages += 1
+            elif declared == "foreign_text":
+                foreign_pages += 1
+        elif char_count < 10:
             page_types.append("blank")
             blank_pages += 1
         else:
@@ -158,7 +168,9 @@ def compute_quality_signals(transcription: dict, image_count: int) -> dict:
         "total_chars": total_chars,
         "chars_per_page": round(chars_per_page, 1),
         "blank_pages": blank_pages,
-        "content_pages": page_count - blank_pages,
+        "gate_pages": gate_pages,
+        "foreign_pages": foreign_pages,
+        "content_pages": page_count - blank_pages - gate_pages - foreign_pages,
         "needs_review": needs_review,
     }
 
@@ -216,6 +228,10 @@ def transcribe_document(
 
     quality = compute_quality_signals(result, len(images))
 
+    # Output follows the pipeline data contract (knowledge/08_DATA_CONTRACT.md):
+    # pages at the top level, object metadata under "metadata". Steps 4-6 pass
+    # both through unchanged. Metadata not delivered by the model (title, date,
+    # image URLs) is filled in here from nothing and completed by the operator.
     output = {
         "_meta": provenance_meta(
             script="03_transcribe.py",
@@ -226,7 +242,10 @@ def transcribe_document(
         ),
         "object_id": doc_id,
         "source_images": [img.name for img in images],
-        "transcription": result,
+        "metadata": result.get("metadata", {}) if isinstance(result.get("metadata"), dict) else {},
+        "pages": result.get("pages", []),
+        "confidence": result.get("confidence", ""),
+        "confidence_notes": result.get("confidence_notes", ""),
         "quality_signals": quality,
     }
 
@@ -287,6 +306,17 @@ def main():
     docs = select_documents(inventory, args.object, args.all, args.sample)
     provider = TRANSCRIPTION_PROVIDER
     model = TRANSCRIPTION_MODEL
+
+    # Fail fast instead of producing empty or partial results without a key.
+    if not args.dry_run:
+        missing = missing_api_key(provider)
+        if missing:
+            print(
+                f"ERROR: no API key configured, this step requires one. "
+                f"Set {missing} in .env for provider '{provider}'.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     print(f"Transcription: {len(docs)} document(s), provider={provider}, model={model}")
     print(f"Chunk size={args.chunk_size}, delay={args.delay}s\n")

@@ -18,6 +18,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 DATA_DIR = PROJECT_ROOT / "data"
 SOURCES_DIR = DATA_DIR / "sources"
 PROCESSED_DIR = DATA_DIR / "processed"
+SOURCE_IMAGES_DIR = SOURCES_DIR / "images"
 IMAGES_DIR = PROCESSED_DIR / "images"
 TRANSCRIPTIONS_DIR = PROCESSED_DIR / "transcriptions"
 VALIDATED_DIR = PROCESSED_DIR / "validated"
@@ -56,6 +57,54 @@ def ensure_dirs():
     for d in [IMAGES_DIR, TRANSCRIPTIONS_DIR, VALIDATED_DIR, TEI_DIR,
               RESULTS_TEI_DIR, RESULTS_REPORTS_DIR, DOCS_DATA_DIR]:
         d.mkdir(parents=True, exist_ok=True)
+
+
+# --- Image root resolution ---
+# One resolver for all pipeline steps. Supplied scans in data/sources/images/
+# take precedence over extracted or fetched images in data/processed/images/,
+# so a corpus delivered as image files never depends on step 1.
+IMAGE_EXTENSIONS = ("*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff")
+
+
+def list_page_images(directory: Path) -> list[Path]:
+    """Return all page images in a directory, sorted by filename."""
+    images: list[Path] = []
+    for pattern in IMAGE_EXTENSIONS:
+        images.extend(directory.glob(pattern))
+    return sorted(images)
+
+
+def resolve_image_dir(doc_id: str) -> Path | None:
+    """Locate the image directory for a document.
+
+    Checks data/sources/images/{doc_id}/ first, then
+    data/processed/images/{doc_id}/. Returns None when neither
+    contains page images.
+    """
+    for root in (SOURCE_IMAGES_DIR, IMAGES_DIR):
+        candidate = root / doc_id
+        if candidate.is_dir() and list_page_images(candidate):
+            return candidate
+    return None
+
+
+# --- API key gate ---
+
+def missing_api_key(provider: str) -> str | None:
+    """Return the name of the missing env variable for a provider, or None.
+
+    Ollama runs locally without a key; unknown providers fail later in llm.py.
+    """
+    required = {
+        "gemini": ("GEMINI_API_KEY", GEMINI_API_KEY),
+        "openai": ("OPENAI_API_KEY", OPENAI_API_KEY),
+        "anthropic": ("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY),
+    }
+    if provider in required:
+        name, value = required[provider]
+        if not value:
+            return name
+    return None
 
 
 def load_prompt(filename: str) -> str:
