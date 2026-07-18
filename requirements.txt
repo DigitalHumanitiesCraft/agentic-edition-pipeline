@@ -4,3 +4,6 @@ requests>=2.31
 Pillow>=10.0
 PyMuPDF>=1.24
 lxml>=5.0
+
+# Development: runnable checks for the pipeline data contract (tests/)
+pytest>=8.0
