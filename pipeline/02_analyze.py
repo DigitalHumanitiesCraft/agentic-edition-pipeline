@@ -32,7 +32,24 @@ EXT_MAP: dict[str, str] = {
     ".pdf": "pdf",
     ".jpg": "image", ".jpeg": "image", ".png": "image", ".tif": "image", ".tiff": "image",
     ".txt": "text", ".xml": "xml", ".docx": "docx",
+    ".json": "transcription",
 }
+
+
+def _count_json_pages(path: Path) -> int:
+    """Page count for a structured transcription JSON (data contract).
+
+    Reads the top-level pages array; a file without one counts as one page.
+    See knowledge/08_DATA_CONTRACT.md for the schema.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 1
+    pages = data.get("pages")
+    if isinstance(pages, list) and pages:
+        return len(pages)
+    return 1
 
 
 def scan_sources() -> dict[str, dict]:
@@ -78,7 +95,12 @@ def scan_sources() -> dict[str, dict]:
                 "files": [],
             }
         documents[doc_id]["files"].append(path.name)
-        documents[doc_id]["pages"] += 1
+        # Transcription JSONs carry several pages per file; every other
+        # source type counts one page per file.
+        if source_type == "transcription":
+            documents[doc_id]["pages"] += _count_json_pages(path)
+        else:
+            documents[doc_id]["pages"] += 1
 
     return documents
 
