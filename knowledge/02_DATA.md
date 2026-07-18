@@ -38,6 +38,8 @@ tags: [data, corpus, inventory]
 
 [TODO: Aufloesung, Farbtiefe, Qualitaetsprobleme (verblasst, beschnitten, durchscheinend)?]
 
+Mindestanforderung fuer diplomatische Transkription: Aufloesung entsprechend etwa 300 DPI der Originalseite. Doppelseiten-Buchscans mit kleinem Satz reichen dafuer in der Regel nicht; solche Seiten werden in Schritt 3 als `page_type: gate_low_resolution` gegated statt transkribiert (siehe [[08_DATA_CONTRACT]]). Bei vorgelieferten Bildscans ist die Aufloesung an der Quelle sicherzustellen, `IMAGE_DPI` wirkt nur auf die PDF-Extraktion in Schritt 1.
+
 ## Automatisches Inventar
 
 <!-- INVENTAR_START -->

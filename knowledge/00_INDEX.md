@@ -12,6 +12,8 @@ Wenn die Dokumente 01–04 noch ungefuellte `[TODO]`-Felder enthalten, ist das R
 
 ## Dokumente
 
+Die Lesereihenfolge ergibt sich aus dieser Tabelle und der Schritt-Tabelle darunter, nicht aus Dateipraefixen. `decisions.md` und `journal.md` tragen die Konventionsnamen der Promptotyping-Dokumente.
+
 | Dokument | Inhalt | Wer fuellt aus | Wann relevant |
 |---|---|---|---|
 | [[01_PROJECT]] | Projektdaten, Forschungsfrage, Editionstyp | Mensch | Projektstart, Frontend |
@@ -19,8 +21,9 @@ Wenn die Dokumente 01–04 noch ungefuellte `[TODO]`-Felder enthalten, ist das R
 | [[03_CONTEXT]] | Editionsrichtlinien, Transkriptionskonventionen | Mensch | Transkription, Validierung |
 | [[04_TEI_MAPPING]] | Quellstruktur zu TEI-Element-Zuordnung | Mensch | TEI-Annotation |
 | [[05_DESIGN]] | Epics, User Stories, UI-Komponenten, Wireframes | Claude Code + Mensch | Frontend-Design |
-| [[06_DECISIONS]] | Architekturentscheidungen (ADR-Format) | Claude Code | Fortlaufend |
-| [[07_JOURNAL]] | Entwicklungsjournal pro Session | Claude Code | Fortlaufend |
+| [[08_DATA_CONTRACT]] | Datenvertrag der Transkriptions-JSON (Schritt 3 bis 6) | Template (fix) | Transkription bis Frontend |
+| [[decisions]] | Architekturentscheidungen (ADR-Format) | Claude Code | Fortlaufend |
+| [[journal]] | Entwicklungsjournal pro Session | Claude Code | Fortlaufend |
 
 ## Lesereihenfolge nach Pipeline-Schritt
 
@@ -28,11 +31,11 @@ Wenn die Dokumente 01–04 noch ungefuellte `[TODO]`-Felder enthalten, ist das R
 |---|---|
 | 01 Bildextraktion | [[02_DATA]] |
 | 02 Analyse | [[01_PROJECT]], [[02_DATA]] |
-| 03 Transkription | [[02_DATA]], [[03_CONTEXT]] |
-| 04 Validierung | [[03_CONTEXT]] |
-| 05 TEI-Annotation | [[03_CONTEXT]], [[04_TEI_MAPPING]] |
+| 03 Transkription | [[02_DATA]], [[03_CONTEXT]], [[08_DATA_CONTRACT]] |
+| 04 Validierung | [[03_CONTEXT]], [[08_DATA_CONTRACT]] |
+| 05 TEI-Annotation | [[03_CONTEXT]], [[04_TEI_MAPPING]], [[08_DATA_CONTRACT]] |
 | 05b Design | [[01_PROJECT]], [[03_CONTEXT]], [[04_TEI_MAPPING]], [[05_DESIGN]] |
-| 06 Frontend | [[01_PROJECT]], [[05_DESIGN]] |
+| 06 Frontend | [[01_PROJECT]], [[05_DESIGN]], [[08_DATA_CONTRACT]] |
 
 ## RIDE-Kriterien-Status
 

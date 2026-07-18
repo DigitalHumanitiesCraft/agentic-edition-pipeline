@@ -45,4 +45,4 @@ Whichever schema you choose, the encoding-profile JSON (`dtabf.json` or its repl
 
 ## Using a different schema in a fork
 
-See [SETUP.md, section 6 (Schema adaptation)](../SETUP.md#6-schema-adaptation). In short: replace the RNG with your profile's schema, adjust or replace `dtabf.json` so the encoding profile matches the new element set, update the modelling decisions in `knowledge/04_TEI_MAPPING.md`, and record the decision in `knowledge/06_DECISIONS.md`.
+See [SETUP.md, section 6 (Schema adaptation)](../SETUP.md#6-schema-adaptation). In short: replace the RNG with your profile's schema, adjust or replace `dtabf.json` so the encoding profile matches the new element set, update the modelling decisions in `knowledge/04_TEI_MAPPING.md`, and record the decision in `knowledge/decisions.md`.

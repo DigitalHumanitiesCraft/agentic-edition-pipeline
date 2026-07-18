@@ -21,4 +21,9 @@ Protokoll jeder Arbeitssession. Claude Code traegt hier am Ende jeder Session Da
 
 ## Sessions
 
-(Wird im Laufe des Projekts gefuellt.)
+### 2026-07-18 Reparatur-Lauf nach den Fork-Testlaeufen
+
+**Ziel:** Alle in den Testlaeufen zbz und szd dokumentierten Template-Bugs beheben und die Doku vereinheitlichen.
+**Ergebnis:** Datenvertrag der Transkriptions-JSON festgeschrieben ([[08_DATA_CONTRACT]]) und in Schritt 3 bis 6 plus Prompt durchgesetzt; Metadaten-Durchreichung in Schritt 4; API-Key-Gate mit klarer Abbruchmeldung in Schritt 3, 4, 5; zentrale Bildwurzel-Aufloesung in `config.py` mit Faksimile-Kopie nach `docs/images/`; Remote-Faksimiles als deklarierter Fall (`metadata.image_urls`, `<facsimile>`/`graphic url`, `fetch_facsimiles.py`); Seiten-Gates (`page_type`), Fremdtext-Abgrenzung und `<lb/>` fuer den diplomatischen Editionstyp in Schritt 5; Whitespace-Normalisierung und pb-Attribut-Parsing in Schritt 6; `.json` als Quellentyp mit Seitenzaehlung in Schritt 2; Statusmodell entschaerft (`needs_review` nicht mehr `problematic`); Umbenennung auf `journal.md`/`decisions.md`; Testabdeckung unter `tests/` (pytest, alle gruen). Entscheidungen in ADR-002 bis ADR-004.
+**Probleme:** Das alte pb-Regex in Schritt 6 verlor das `facs`-Attribut bei der Attributreihenfolge `n` vor `facs`; durch attributweises Parsen ersetzt.
+**Naechste Schritte:** Ersten Produktiv-Fork mit korpusspezifisch iterierten Prompts aufsetzen (SETUP.md Abschnitt 5); LLM-Annotationspass in Schritt 5 implementieren, sobald ein Fork ihn braucht.

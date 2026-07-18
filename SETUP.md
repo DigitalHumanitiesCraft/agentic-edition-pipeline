@@ -22,6 +22,8 @@ cp .env.example .env
 
 Open `.env` in any text editor. At minimum, fill in one provider key for step 3 (transcription). Steps 4 (validation) and 5 (TEI annotation) run without API keys in deterministic mode.
 
+Every step that calls an LLM provider (transcription, LLM validation, LLM annotation) checks its key at startup and aborts with `no API key configured, this step requires one` instead of producing empty or partial results. There is no key-less transcription mode; transcriptions produced outside step 3 enter the pipeline as contract-conformant JSON (see `knowledge/08_DATA_CONTRACT.md`).
+
 ---
 
 ## 2. Required configuration
@@ -56,6 +58,11 @@ Source material placement:
 | Image scans (JPEG, PNG, TIFF) | `data/sources/images/{doc_id}/` |
 | Existing transcriptions (plain text) | `data/sources/text/` |
 | Existing PAGE-XML or TEI | `data/sources/text/` |
+| Structured transcription JSON (data contract) | `data/sources/text/` for the inventory; contract-conformant copies in `data/processed/transcriptions/` for steps 4-6 |
+
+With ready-made image scans, step 1 is skipped entirely: all scripts resolve images through one shared root resolution (`data/sources/images/{doc_id}/` first, then `data/processed/images/{doc_id}/`), so supplied scans are consumed directly by steps 2, 3, and 6.
+
+Structured transcription JSON must follow the pipeline data contract in `knowledge/08_DATA_CONTRACT.md` (`pages` at the top level, page text under `transcription`, object metadata under `metadata`). Step 2 counts their pages from the `pages` array. When the corpus references its facsimiles as remote URLs, declare them in `metadata.image_urls`; `pipeline/fetch_facsimiles.py` can materialize local copies.
 
 ### 2.3 Transcription conventions — `knowledge/03_CONTEXT.md`
 
@@ -111,21 +118,25 @@ All tunable values live in `.env` and are read by `pipeline/config.py`.
 | `CHUNK_SIZE` | `20` | Lower for vision models with small context windows, raise for models that handle more images |
 | `IMAGE_DPI` | `150` | Raise to `300` for small print or fine handwriting; lower for large corpus to save disk space |
 
+`IMAGE_DPI` only affects the PDF-to-image extraction in step 1. For ready-made image scans it has no effect; their resolution is fixed by the delivered digitisation and must be ensured at the source. As a minimum for diplomatic transcription, aim for the equivalent of 300 DPI of the original page (for a single octavo page roughly 2500 pixels on the long edge; more for fine print or small handwriting). Double-page book scans at low resolution are generally insufficient for faithful transcription of the running text; expect such pages to be gated as `page_type: gate_low_resolution` (see `knowledge/08_DATA_CONTRACT.md`) rather than transcribed.
+
 ---
 
 ## 5. Prompt customisation
 
-The three prompt templates are in `pipeline/prompts/`. Layers 1 (base rules) rarely need editing. The project-specific content enters via layers 2 and 3 at runtime from the knowledge documents.
+The three prompt templates in `pipeline/prompts/` (transcription, annotation, validation) and the object-specific layer under `pipeline/prompts/objects/` are starting points, not finished instruments. Every corpus requires adapting them to its source material, and that adaptation is iterative: adapt the prompt, run it on a sample, evaluate the output against the originals at the checkpoint, revise, repeat. Plan several such iterations before a production run over the full corpus is defensible. The template's own test runs deliberately did not perform this tuning; a fork must.
 
-Edit Layer 1 of a prompt only when:
+Layer 1 (base rules) changes are typically needed when:
 
-- Your source language is not covered by the base rules (e.g. Arabic script, East Asian languages).
+- Your source language or script is not covered by the base rules (e.g. Arabic script, East Asian languages, Kurrent).
 - Your edition type requires structural rules the default does not include (e.g. verse numbering, tabular ledger entries).
-- A previous pilot run showed a systematic error that a rule change would prevent.
+- A pilot run showed a systematic error that a rule change would prevent.
 
-Document any Layer 1 changes in `knowledge/06_DECISIONS.md` with the rationale, so future maintainers understand why the template defaults were overridden.
+The project-specific content enters via layers 2 and 3 at runtime from the knowledge documents. Document any Layer 1 changes in `knowledge/decisions.md` with the rationale, so future maintainers understand why the template defaults were overridden.
 
 Per-object prompt overrides (for individual documents with special handling) go in `pipeline/prompts/objects/{object_id}.md`.
+
+Operational note for agentic transcription: a vision model can only read an image that exists as a local file. Materialize remote facsimiles first (`pipeline/fetch_facsimiles.py`), then read the saved file; fetching a URL inside an agent tool returns bytes and metadata, not vision input.
 
 ---
 
@@ -141,7 +152,7 @@ DTABf is the default TEI profile for historical German-language texts. If your p
 1. Replace `schemas/basisformat.rng` with your profile's RelaxNG schema.
 2. Adjust or replace `schemas/dtabf.json` so the annotation guidance matches the new element set.
 3. Update `knowledge/04_TEI_MAPPING.md` to match the new profile.
-4. Record the decision in `knowledge/06_DECISIONS.md`.
+4. Record the decision in `knowledge/decisions.md`.
 
 ---
 

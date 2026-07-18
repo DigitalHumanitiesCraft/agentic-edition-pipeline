@@ -7,8 +7,10 @@ This repository is a forkable template for AI-assisted digital scholarly edition
 ## Rules (violations are bugs)
 
 - ALWAYS verify that the relevant `knowledge/` documents are filled in before running or modifying a script. Ask if they are empty.
-- ALWAYS adapt existing pipeline scripts in `pipeline/`. Write new code only when no existing script covers the source type. Document every adaptation in `knowledge/06_DECISIONS.md`.
-- ALWAYS log date, objective, and result of every session in `knowledge/07_JOURNAL.md`.
+- ALWAYS adapt existing pipeline scripts in `pipeline/`. Write new code only when no existing script covers the source type. Document every adaptation in `knowledge/decisions.md`.
+- ALWAYS log date, objective, and result of every session in `knowledge/journal.md`.
+- ALWAYS keep transcription JSON on the pipeline data contract (`knowledge/08_DATA_CONTRACT.md`): `pages` at the top level, page text under `transcription`, object metadata under `metadata`, passed through unchanged from step 3 to step 6.
+- Steps that call an LLM provider check the API key first and abort with a clear message when it is missing. NEVER work around this with an import mode or a silent fallback; externally produced transcriptions enter the pipeline as contract-conformant JSON in `data/processed/transcriptions/`.
 - ALWAYS write provenance metadata into every generated file. JSON files get a `_meta` object. TEI-XML files get a `<revisionDesc>` entry. Include model name, prompt template, and timestamp.
 - NEVER skip a checkpoint. Each pipeline step has a verification checkpoint that requires explicit approval before proceeding.
 - NEVER abort on single-object failures. Write the error to `errors.json` in the output directory and continue with the next object.
@@ -54,7 +56,7 @@ Seven steps with verification checkpoints. NEVER skip a checkpoint.
 
 ### Step 1 Source preparation
 
-Organise source material into one image directory per document. The script only converts PDFs; image files (JPEG, PNG, TIFF) go directly into `data/sources/images/{doc_id}/` and are picked up by steps 2 and 3 without conversion. Record object-level metadata (title, date, rights) in `knowledge/02_DATA.md`.
+Organise source material into one image directory per document. The script only converts PDFs; image files (JPEG, PNG, TIFF) go directly into `data/sources/images/{doc_id}/` and are picked up by steps 2, 3, and 6 through the shared image-root resolver (`config.resolve_image_dir`: `data/sources/images/` first, then `data/processed/images/`). Record object-level metadata (title, date, rights) in `knowledge/02_DATA.md`.
 
 - **Script** `pipeline/01_extract_images.py` (only when PDFs exist in `data/sources/pdf/`)
 - **Reads** `data/sources/pdf/`
@@ -72,9 +74,9 @@ Organise source material into one image directory per document. The script only 
 
 ### Step 3 Transcription
 
-- **Script** `pipeline/03_transcribe.py`
-- **Reads** images from `data/processed/images/` or `data/sources/images/`
-- **Writes** `data/processed/transcriptions/{object_id}.json`
+- **Script** `pipeline/03_transcribe.py` (requires an API key for the transcription provider; aborts with a clear message without one)
+- **Reads** images via the shared image-root resolver: `data/sources/images/{doc_id}/` first, then `data/processed/images/{doc_id}/`
+- **Writes** `data/processed/transcriptions/{object_id}.json` (data contract, `knowledge/08_DATA_CONTRACT.md`)
 - **Context** `knowledge/02_DATA.md`, `knowledge/03_CONTEXT.md`
 - **Prompt** `pipeline/prompts/transcription.md`
 
@@ -143,6 +145,10 @@ Build the frontend based on the components and wireframes defined in `05_DESIGN.
 
 **Existing TEI files.** Steps 1-5 are skipped. TEI files go into `data/sources/text/` and are processed directly by step 6 (frontend). Alternatively, specific transformation tasks can be defined and executed as modifications to the existing TEI files.
 
+**Existing structured transcriptions (JSON).** Files following the data contract (`knowledge/08_DATA_CONTRACT.md`) are placed in `data/processed/transcriptions/{object_id}.json`; the pipeline continues at step 4. For the inventory they may additionally lie in `data/sources/text/`, where step 2 counts their pages from the `pages` array.
+
+**Remote facsimiles.** Images are delivered as URLs, not files. Declare them in `metadata.image_urls` of the transcription JSON; step 5 writes them as `<facsimile>` with `graphic url`, the frontend renders the URL directly. To materialize local copies (required for vision-based transcription and verification; fetch the image to disk first, a URL fetch alone does not reach the vision input), run `pipeline/fetch_facsimiles.py`, which writes to `data/processed/images/{object_id}/`. Check the image licence before materializing.
+
 ## Script modification protocol
 
 When a pipeline script needs modification because it does not cover a source type:
@@ -152,8 +158,8 @@ When a pipeline script needs modification because it does not cover a source typ
 3. Read the corresponding implementation in the reference repository (see capability map below)
 4. Implement the change
 5. Test on a single object
-6. Document in `knowledge/06_DECISIONS.md` (context, decision, rationale)
-7. Document test result in `knowledge/07_JOURNAL.md`
+6. Document in `knowledge/decisions.md` (context, decision, rationale)
+7. Document test result in `knowledge/journal.md`
 
 ## Reference repositories
 

@@ -43,9 +43,10 @@ Each pipeline step has a human verification checkpoint. Nothing proceeds without
 
 You do not have to use the full pipeline. Common partial reuse patterns from the reference projects:
 
-- **Existing transcriptions, no OCR needed.** Place plain text files in `data/sources/text/`. Skip steps 1 and 3. The pipeline starts at step 2 (inventory), proceeds to step 4 (validation of existing transcriptions), and continues to TEI annotation.
+- **Existing transcriptions, no OCR needed.** Place plain text files in `data/sources/text/`. Skip steps 1 and 3. The pipeline starts at step 2 (inventory), proceeds to step 4 (validation of existing transcriptions), and continues to TEI annotation. Structured transcription JSON goes directly into `data/processed/transcriptions/` in the pipeline data contract format (`knowledge/08_DATA_CONTRACT.md`); step 2 counts JSON pages from the `pages` array.
+- **Remote facsimiles.** When images are referenced as URLs instead of local files, declare them in `metadata.image_urls` of the transcription JSON. Step 5 writes them as `<facsimile>` with `graphic url`, the frontend renders the URLs directly, and `pipeline/fetch_facsimiles.py` materializes local copies when vision-based transcription or verification needs the files on disk.
 - **Existing TEI, frontend only.** Place TEI files in `data/sources/text/` and copy them to `results/tei/`. Skip steps 1–5. Run only step 6 (frontend build).
-- **Different TEI schema.** Replace the schema files in `schemas/` (see `schemas/README.md`) and update `knowledge/04_TEI_MAPPING.md`. Document the decision in `knowledge/06_DECISIONS.md`.
+- **Different TEI schema.** Replace the schema files in `schemas/` (see `schemas/README.md`) and update `knowledge/04_TEI_MAPPING.md`. Document the decision in `knowledge/decisions.md`.
 - **Different LLM provider.** Change `TRANSCRIPTION_PROVIDER` and `TRANSCRIPTION_MODEL` in `.env`. The provider abstraction in `pipeline/llm.py` supports Gemini, OpenAI, Anthropic, and Ollama without code changes.
 
 ### Local preview
@@ -91,7 +92,7 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Skip when.** Source material is already images or plain text. Image directories under `data/sources/images/` are picked up directly by steps 2 and 3 without any conversion.
 
-**Metadata.** Object-level metadata (title, date, language, rights) currently lives in the knowledge documents at corpus level and flows into the TEI header from `knowledge/01_PROJECT.md`. Per-object metadata capture is planned as a per-document manifest; until then, record object-specific metadata in `knowledge/02_DATA.md`.
+**Metadata.** Corpus-level metadata (editor, institution, licence) lives in `knowledge/01_PROJECT.md` and flows into the TEI header from there. Per-object metadata (title, language, date, object type, remote image URLs) lives in the `metadata` object of the transcription JSON (`knowledge/08_DATA_CONTRACT.md`) and is passed through unchanged to the TEI header and the frontend catalog. Record where it comes from in `knowledge/02_DATA.md`.
 
 **Known limits.** The script renders PDF pages fresh at the configured DPI; for image-only scanned PDFs this re-rasterises the embedded scan, which cannot exceed the source resolution.
 
@@ -115,9 +116,11 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Purpose.** Send page images to a vision model and obtain diplomatic transcriptions. Handles chunking for documents that exceed the model's image-per-call limit.
 
-**Input.** `data/inventory.json`, images from `data/processed/images/{doc_id}/` or `data/sources/images/{doc_id}/`
+**Input.** `data/inventory.json`, images via the shared image-root resolver (`data/sources/images/{doc_id}/` first, then `data/processed/images/{doc_id}/`)
 
-**Output.** `data/processed/transcriptions/{doc_id}.json` — transcription with per-page text, confidence level, and quality signals.
+**Output.** `data/processed/transcriptions/{doc_id}.json` in the pipeline data contract format (`knowledge/08_DATA_CONTRACT.md`): `pages` at the top level with per-page `transcription`, object metadata under `metadata`, confidence level, and quality signals.
+
+**API key.** This step requires a key for the configured provider and aborts with a clear message when none is set. Transcriptions produced elsewhere enter the pipeline as contract-conformant JSON instead.
 
 **Key parameters.** `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL`, `CHUNK_SIZE` (default 20 images per API call), `BATCH_DELAY` (default 2 s between documents), `--sample N` (pilot run on first N documents).
 
@@ -133,7 +136,7 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Input.** `data/processed/transcriptions/{doc_id}.json`
 
-**Output.** `data/processed/validated/{doc_id}.json` — original transcription plus rule results, per-page statistics, optional LLM assessments, and an `overall_status` field (`confident` / `needs_review` / `problematic`).
+**Output.** `data/processed/validated/{doc_id}.json` — original transcription (`pages` and `metadata` passed through unchanged) plus rule results, per-page statistics, optional LLM assessments, and an `overall_status` field (`confident` / `needs_review` / `problematic`). The `needs_review` quality signal from step 3 means "unverified transcription" and maps to `needs_review`, not `problematic`; pages gated for insufficient image quality cap the status at `needs_review`.
 
 **Key parameters.** `VALIDATION_PROVIDER`, `VALIDATION_MODEL` (both empty → deterministic only), `--no-llm` (force deterministic mode regardless of configuration).
 
@@ -161,7 +164,9 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Plaintext preservation.** After generation, the script computes word-set similarity between the source transcription and the generated TEI body. Similarity below 0.95 triggers a warning; below 0.80 is flagged as low. This check catches annotation errors where the model altered the text content.
 
-**Known limits.** Deterministic TEI splits text on double newlines into `<p>` elements. Complex layouts (nested tables, verse, apparatus) require LLM enrichment and project-specific mapping rules. The LLM enrichment pass does not yet support cross-document entity resolution; each document is annotated independently.
+**Structure.** Deterministic TEI splits page text on blank lines into `<p>` elements; within a paragraph, line breaks become `<lb/>` unless the edition type in `knowledge/01_PROJECT.md` is normalised. Remote facsimile URLs from `metadata.image_urls` produce a `<facsimile>` block with `graphic url`, referenced from `<pb facs="#facs_N"/>`. Page-level fields from the data contract are honoured: foreign text becomes `<note type="foreign">`, quality-gated pages get `<note type="gate">`, and empty pages without a declared `page_type` are marked `<note type="empty">` for verification.
+
+**Known limits.** Complex layouts (nested tables, verse, apparatus) require LLM enrichment and project-specific mapping rules. The LLM enrichment pass does not yet support cross-document entity resolution; each document is annotated independently.
 
 ---
 
@@ -183,7 +188,7 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Input.** `results/tei/*.xml`, `knowledge/01_PROJECT.md`, `knowledge/05_DESIGN.md`
 
-**Output.** `docs/data/catalog.json` (project-level index), `docs/data/{doc_id}.json` (per-document data with pages, text, image paths). The frontend HTML/CSS/JS in `docs/` is static and pre-existing; this step only fills `docs/data/`.
+**Output.** `docs/data/catalog.json` (project-level index), `docs/data/{doc_id}.json` (per-document data with pages, text, image paths). Local facsimiles resolved via the shared image root are copied to `docs/images/{doc_id}/` so the static site can serve them; remote facsimile URLs from the TEI `<facsimile>` block are rendered directly. `has_images` reflects what the viewer can actually show. The frontend HTML/CSS/JS in `docs/` is static and pre-existing; this step fills `docs/data/` and `docs/images/`.
 
 **Key parameters.** `--force` (regenerate all data files), `--serve` (start local HTTP server on port 8080).
 
@@ -201,10 +206,11 @@ agentic-edition-pipeline/
 │   ├── 03_CONTEXT.md            # Editorial guidelines, transcription conventions
 │   ├── 04_TEI_MAPPING.md        # Source structure → TEI element mapping
 │   ├── 05_DESIGN.md             # Epics, user stories, UI components, wireframes
-│   ├── 06_DECISIONS.md          # Architecture Decision Records
-│   └── 07_JOURNAL.md            # Development journal
+│   ├── 08_DATA_CONTRACT.md      # Pipeline data contract (transcription JSON schema)
+│   ├── decisions.md             # Architecture Decision Records
+│   └── journal.md               # Development journal
 ├── pipeline/                    # Python scripts (6 steps + infrastructure)
-│   ├── config.py                # Paths, API config, shared utilities
+│   ├── config.py                # Paths, API config, image-root resolver, shared utilities
 │   ├── llm.py                   # Multi-provider LLM (Gemini, OpenAI, Anthropic, Ollama)
 │   ├── 01_extract_images.py     # Source preparation: PDF → page images
 │   ├── 02_analyze.py            # Corpus inventory
@@ -212,8 +218,10 @@ agentic-edition-pipeline/
 │   ├── 04_validate.py           # Hybrid validation (rules + LLM judge)
 │   ├── 05_annotate_tei.py       # TEI-XML generation with validation
 │   ├── 06_build_frontend.py     # TEI → static site data + local server
+│   ├── fetch_facsimiles.py      # Utility: materialize remote facsimile URLs locally
 │   └── prompts/                 # Prompt templates (transcription, validation, annotation)
 ├── schemas/                     # DTABf encoding profile (JSON) + official RelaxNG, see schemas/README.md
+├── tests/                       # Pytest checks for the data contract and TEI generation
 ├── docs/                        # Static curation frontend (GitHub Pages root)
 ├── data/sources/                # Input data (your source material)
 ├── data/processed/              # Intermediate results (generated)

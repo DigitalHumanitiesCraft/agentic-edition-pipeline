@@ -10,6 +10,15 @@ __pycache__/
 *.egg-info/
 
 # Data (user-provided and generated)
+#
+# Note on negations: a pattern like `results/**` also matches everything inside
+# subdirectories, and `!results/tei/` re-includes only the directory itself,
+# not its contents. To version files below an ignored tree you need a
+# recursive negation for the contents, e.g.:
+#   !data/sources/text/*.json    # check in a small transcription fixture set
+#   !results/tei/**              # check in the publication-ready TEI
+#   !docs/data/**                # check in the generated frontend data
+# Keep re-obtainable data (remote facsimiles, bulk scans) ignored.
 data/processed/**
 !data/processed/.gitkeep
 data/sources/**
@@ -27,6 +36,10 @@ results/**
 # Generated frontend data
 docs/data/**
 !docs/data/.gitkeep
+
+# Facsimiles copied into docs/ by step 6 are needed for GitHub Pages
+# (deploy from branch serves committed files only), so docs/images/ is
+# deliberately NOT ignored.
 
 # IDE and OS
 .vscode/
