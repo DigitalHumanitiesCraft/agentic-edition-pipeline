@@ -1,0 +1,22 @@
+{
+  "@context": "https://w3id.org/codemeta/3.0",
+  "@type": "SoftwareSourceCode",
+  "name": "Agentic Edition Pipeline",
+  "description": "A forkable template for AI-assisted digital scholarly editions from digitised sources to TEI-XML and a published frontend.",
+  "codeRepository": "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline",
+  "author": [
+    {
+      "@type": "Person",
+      "id": "https://orcid.org/0000-0002-4879-129X",
+      "givenName": "Christopher",
+      "familyName": "Pollin",
+      "affiliation": {
+        "@type": "Organization",
+        "name": "Digital Humanities Craft OG"
+      },
+      "sameAs": "https://github.com/chpollin"
+    }
+  ],
+  "license": "https://spdx.org/licenses/MIT",
+  "dateModified": "2026-07-23"
+}

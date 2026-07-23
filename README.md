@@ -275,9 +275,9 @@ Every forked edition structurally addresses the [IDE criteria for reviewing digi
 }
 ```
 
-## License
+## Licence
 
-CC-BY 4.0. See [LICENSE](LICENSE).
+Code is licensed under the MIT License (see [LICENSE](LICENSE)). Documentation and knowledge documents are licensed under Creative Commons Attribution 4.0 International (CC BY 4.0). Third-party research data is excluded from these terms; rights remain with their respective holders.
 
 ## Author
 
