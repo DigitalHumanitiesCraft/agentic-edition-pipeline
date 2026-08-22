@@ -1,0 +1,49 @@
+{
+  "manifest_version": "0.1",
+  "name": "synthetic-example",
+  "created": "2026-08-22",
+  "description": "Worked example of the fixture manifest; all paths relative to this file.",
+  "profile": "hsa-strict",
+  "relaxng_schema": "mini.rng",
+  "fixtures": [
+    {
+      "id": "text-pair",
+      "checks": ["cer"],
+      "hypothesis": {"kind": "text", "path": "hypothesis.txt"},
+      "reference": {"kind": "text", "path": "reference.txt"},
+      "scope": "all",
+      "reference_class": "synthetic",
+      "maturity": "formal-validation"
+    },
+    {
+      "id": "edition-vs-transcription",
+      "checks": ["cer"],
+      "hypothesis": {"kind": "transcription-json", "path": "transcription.json", "pages": [1, 2]},
+      "reference": {"kind": "tei-edition", "path": "edition.xml"},
+      "scope": "pages 1 and 2",
+      "reference_class": "synthetic",
+      "maturity": "formal-validation"
+    },
+    {
+      "id": "zbz-pair",
+      "checks": ["cer"],
+      "profile": "zbz-fidelity",
+      "hypothesis": {"kind": "tei", "path": "edition.xml"},
+      "reference": {"kind": "tei", "path": "edition.xml"},
+      "reference_class": "synthetic",
+      "maturity": "formal-validation"
+    },
+    {
+      "id": "good-tei",
+      "checks": ["relaxng"],
+      "tei": {"path": "good.xml"},
+      "maturity": "formal-validation"
+    },
+    {
+      "id": "bad-tei",
+      "checks": ["relaxng"],
+      "tei": {"path": "bad.xml"},
+      "maturity": "formal-validation"
+    }
+  ]
+}

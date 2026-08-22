@@ -262,6 +262,17 @@ Both entries are placeholders until the first fork test run is complete. The lin
 
 Every forked edition structurally addresses the [IDE criteria for reviewing digital scholarly editions](https://www.i-d-e.de/publikationen/weitereschriften/criteria-version-1-1) (v1.1), [tools](https://www.i-d-e.de/publikationen/weitereschriften/criteria-tools-version-1) (v1), and [text collections](https://www.i-d-e.de/publikationen/weitereschriften/criteria-text-collections-version-1-0) (v1.0). See `knowledge/00_INDEX.md` for the RIDE self-assessment checklist.
 
+### Evaluation module `aep_eval`
+
+`aep_eval` evaluates existing outputs against references without touching them: character error rate under a declared normalisation profile and TEI conformance against an explicitly named RelaxNG schema. A fixture manifest (`schemas/evaluation-fixture.schema.json`) names hypothesis, reference, scope, reference class, maturity tier, Git anchor and file hashes; the run writes `results.json` (`schemas/evaluation-result.schema.json`) and `report.md`.
+
+```
+python -m aep_eval tests/fixtures/evaluation/manifest.json --out results/evaluation
+python -m aep_eval MANIFEST --out DIR --strict      # exit 1 when any TEI file is invalid
+```
+
+Profiles in v0.1: `hsa-strict` (whitespace collapsed, case and punctuation kept, edition reference without editorial notes, transcription conventions resolved; aggregate char-weighted) and `zbz-fidelity` (zbz-ocr-tei extraction and symmetric normalisation, fidelity share of the edit distance; aggregate fixture mean). There is no universal profile; every result names the profile it was computed under. Exit codes: 0 clean, 1 fixture errors, 2 unusable manifest. Design decision: `knowledge/decisions.md`, ADR-006.
+
 ## Citation
 
 ```bibtex

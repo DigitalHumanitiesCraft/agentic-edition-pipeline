@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/schemas/evaluation-result.schema.json",
+  "title": "aep_eval result set v0.1",
+  "description": "One evaluation run: tool and manifest provenance, per-profile aggregates, one record per fixture and metric (CER or RelaxNG) with value, sample size, scope, profile, reference class, maturity tier, Git anchor and input hashes, and the collected errors.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["result_version", "tool", "created_at", "manifest", "aggregates", "results", "errors"],
+  "properties": {
+    "result_version": {"const": "0.1"},
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"const": "aep_eval"},
+        "version": {"type": "string"},
+        "git_sha": {"type": ["string", "null"]}
+      }
+    },
+    "created_at": {"type": "string"},
+    "manifest": {
+      "type": "object",
+      "required": ["name", "path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "path": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "git_anchors": {"type": "object"}
+      }
+    },
+    "aggregates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["metric", "profile", "method", "value_field", "n_fixtures", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "metric": {"type": "string", "enum": ["cer", "relaxng"]},
+          "profile": {"type": ["string", "null"]},
+          "method": {"type": "string", "enum": ["char-weighted", "fixture-mean", "count"]},
+          "value_field": {"type": "string"},
+          "n_fixtures": {"type": "integer", "minimum": 0},
+          "value": {"type": "number"}
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/record"}
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fixture_id", "stage", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "fixture_id": {"type": "string"},
+          "stage": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["fixture_id", "metric", "status", "value", "n", "scope", "profile", "reference_class", "maturity", "git_anchor", "input_hashes", "details"],
+      "additionalProperties": false,
+      "properties": {
+        "fixture_id": {"type": "string"},
+        "metric": {"type": "string", "enum": ["cer", "relaxng"]},
+        "status": {"type": "string", "enum": ["ok", "valid", "invalid", "error"]},
+        "value": {"type": ["number", "null"]},
+        "n": {"type": "integer", "minimum": 0},
+        "scope": {"type": "string"},
+        "profile": {"type": ["string", "null"]},
+        "reference_class": {"type": "string"},
+        "maturity": {"type": "string"},
+        "git_anchor": {"type": ["string", "null"]},
+        "input_hashes": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "details": {"type": "object"},
+        "message": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

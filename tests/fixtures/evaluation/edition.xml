@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc>synthetic edition reference with editorial apparatus</fileDesc></teiHeader>
+  <text>
+    <body>
+      <div>
+        <p>Lieber Freund,<note type="editorial">Anrede ergänzt</note> ich danke Ihnen.</p>
+        <p>Mit <choice><sic>bestem</sic><corr>besten</corr></choice> Grüßen<note place="foot">Fußnote</note>.</p>
+      </div>
+    </body>
+  </text>
+</TEI>

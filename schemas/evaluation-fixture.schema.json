@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/schemas/evaluation-fixture.schema.json",
+  "title": "aep_eval fixture manifest v0.1",
+  "description": "Names the fixtures an evaluation run reads: hypothesis and reference with kind, path, optional sha256 and page scope; the CER profile; the RelaxNG schema; reference class, maturity tier and Git anchor. Relative paths resolve against the manifest's directory. Inputs are read only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "name", "created", "fixtures"],
+  "properties": {
+    "manifest_version": {"const": "0.1"},
+    "name": {"type": "string", "minLength": 1},
+    "created": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "description": {"type": "string"},
+    "profile": {"$ref": "#/$defs/profile"},
+    "relaxng_schema": {"type": "string", "minLength": 1},
+    "git_anchors": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["commit"],
+        "properties": {
+          "path": {"type": "string"},
+          "commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+          "note": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/fixture"}
+    }
+  },
+  "$defs": {
+    "profile": {"type": "string", "enum": ["hsa-strict", "zbz-fidelity"]},
+    "kind": {"type": "string", "enum": ["text", "transcription-json", "tei", "tei-edition"]},
+    "side": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"$ref": "#/$defs/kind"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "pages": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1}
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "required": ["id", "checks", "maturity"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["cer", "relaxng"]}
+        },
+        "profile": {"$ref": "#/$defs/profile"},
+        "hypothesis": {"$ref": "#/$defs/side"},
+        "reference": {"$ref": "#/$defs/side"},
+        "tei": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+            "relaxng_schema": {"type": "string", "minLength": 1}
+          }
+        },
+        "scope": {"type": "string"},
+        "reference_class": {
+          "type": "string",
+          "enum": ["published-edition", "manual-reference-tei", "human-corrected", "agent-verified", "synthetic", "none"]
+        },
+        "maturity": {
+          "type": "string",
+          "enum": ["observed-function", "formal-validation", "model-judged", "human-reviewed", "operator-accepted"]
+        },
+        "git_anchor": {"type": "string"},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

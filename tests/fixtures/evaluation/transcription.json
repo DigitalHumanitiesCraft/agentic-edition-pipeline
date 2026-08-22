@@ -1,0 +1,10 @@
+{
+  "_meta": {"script": "synthetic", "timestamp": "2026-08-22T00:00:00+00:00", "pipeline_step": 3},
+  "object_id": "synthetic1",
+  "metadata": {"title": "Synthetic letter", "language": "de"},
+  "pages": [
+    {"page": 1, "transcription": "Lieber Freund, ich danke [?] Ihnen."},
+    {"page": 2, "transcription": "Mit ~~bestem~~ besten {Grüßen}."},
+    {"page": 3, "transcription": "Adresse [...] nicht verglichen"}
+  ]
+}

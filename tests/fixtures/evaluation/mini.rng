@@ -1,0 +1,14 @@
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" ns="http://www.tei-c.org/ns/1.0">
+  <start>
+    <element name="TEI">
+      <element name="teiHeader">
+        <element name="fileDesc"><text/></element>
+      </element>
+      <element name="text">
+        <element name="body">
+          <oneOrMore><element name="p"><text/></element></oneOrMore>
+        </element>
+      </element>
+    </element>
+  </start>
+</grammar>
