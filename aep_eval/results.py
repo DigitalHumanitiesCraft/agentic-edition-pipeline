@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
@@ -114,7 +114,7 @@ def build_report(
             "version": __version__,
             "git_sha": tool_git_sha(repo_root),
         },
-        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "manifest": {
             "name": manifest.name,
             "path": str(manifest.path),

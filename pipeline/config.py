@@ -35,8 +35,10 @@ DOCS_DATA_DIR = DOCS_DIR / "data"
 # --- TEI validation target (ADR-005) ---
 # Per-fork choice: point this at the RelaxNG schema your project validates
 # against (TEI All, DTABf, or your own RNG; see schemas/README.md).
-# Checked by pipeline/validate_schema.py.
-VALIDATION_SCHEMA = SCHEMAS_DIR / "basisformat.rng"
+# Checked by pipeline/validate_schema.py. The default is TEI All, because the
+# deterministic generator's output validates against it out of the box; the
+# stricter DTABf profile (basisformat.rng) needs an adapted header first.
+VALIDATION_SCHEMA = SCHEMAS_DIR / "tei_all.rng"
 
 # --- API keys ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

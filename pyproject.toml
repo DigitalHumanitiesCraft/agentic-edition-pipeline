@@ -1,0 +1,43 @@
+# Project metadata and tool configuration. The pipeline is a script regime:
+# no [build-system], nothing is installed, the numbered steps run in place.
+# requirements.txt stays the documented install path (SETUP.md).
+
+[project]
+name = "agentic-edition-pipeline"
+version = "0.1.0"
+description = "Forkable template for LLM-assisted digital scholarly editions: images to transcription to TEI to static frontend."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Christopher Pollin", email = "office@dhcraft.org" }]
+dependencies = [
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+    "Pillow>=10.0",
+    "PyMuPDF>=1.24",
+    "lxml>=5.0",
+    "jsonschema>=4.0",
+    "rapidfuzz>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.15"]
+
+[project.urls]
+Repository = "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline"
+
+[tool.ruff]
+target-version = "py310"
+# The step scripts import their shared modules by bare name from within
+# pipeline/, and the tests import conftest the same way; naming both roots
+# lets the import sorter tell first-party modules from dependencies.
+src = ["pipeline", "tests", "."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "PTH", "RUF"]
+ignore = ["E501"]  # line length is the formatter's business
+# En dash and em dash are corpus characters, not typos: they appear in
+# transcriptions and in the rules that reason about them.
+allowed-confusables = ["–", "—"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

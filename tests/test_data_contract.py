@@ -20,6 +20,7 @@ step4 = load_step("04_validate")
 step5 = load_step("05_annotate_tei")
 step6 = load_step("06_build_frontend")
 config = load_step("config")
+contract = load_step("contract")
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +46,13 @@ def test_validate_passes_pages_and_metadata_through(monkeypatch, tmp_path, fixtu
     out = _run_validate(monkeypatch, tmp_path, fixture_transcription)
     assert out["pages"] == fixture_transcription["pages"]
     assert out["metadata"] == fixture_transcription["metadata"]
+
+
+def test_step4_output_still_satisfies_the_runtime_contract(
+    monkeypatch, tmp_path, fixture_transcription
+):
+    out = _run_validate(monkeypatch, tmp_path, fixture_transcription)
+    assert contract.file_violations(out) == []
 
 
 def test_needs_review_signal_maps_to_needs_review_not_problematic(

@@ -1,11 +1,11 @@
 """Validate generated TEI against the fork's chosen RelaxNG schema.
 
 The validation target is a per-project decision (ADR-005): set
-VALIDATION_SCHEMA in pipeline/config.py or pass --schema. The shipped
-schemas/basisformat.rng is the DTABf example profile; the deterministic
-generator's header does not pass strict DTABf (journal, 2026-07-18), so
-strict-DTABf forks must adapt the header first or validate against
-TEI All or their own schema (see schemas/README.md).
+VALIDATION_SCHEMA in pipeline/config.py or pass --schema. The default is
+schemas/tei_all.rng, which the deterministic generator's output satisfies as
+shipped. The DTABf profile (schemas/basisformat.rng) also ships, but the
+generator's header does not pass it (journal, 2026-07-18), so a strict-DTABf
+fork adapts the header template first (see schemas/README.md).
 
 Usage:
     python pipeline/validate_schema.py                    # all results/tei/*.xml

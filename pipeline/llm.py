@@ -28,6 +28,26 @@ LOCAL_TIMEOUT = 480
 MAX_RETRIES = 4
 BACKOFF_BASE = 5
 
+# Key redaction. Provider errors quote the request URL and the request
+# headers, so an unredacted message ends up in a console log or in
+# errors.json. Every error string that carries a URL or a provider
+# exception text passes through redact_secrets first.
+REDACTED = "[redacted]"
+_QUERY_KEY_RE = re.compile(
+    r"([?&](?:key|api[_-]?key|access[_-]?token)=)[^&\s\"']+", re.IGNORECASE
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Remove key query parameters and configured key values from a message."""
+    if not text:
+        return ""
+    cleaned = _QUERY_KEY_RE.sub(rf"\g<1>{REDACTED}", text)
+    for secret in (GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY):
+        if secret:
+            cleaned = cleaned.replace(secret, REDACTED)
+    return cleaned
+
 
 def encode_image(path: Path) -> tuple[str, str]:
     """Read an image file and return (base64_string, mime_type)."""
@@ -97,7 +117,10 @@ def _call_gemini(model: str, prompt: str, images: list[Path] | None, temperature
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not set. Add it to .env")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+    # The key travels as a header, never as a query parameter: a URL reaches
+    # proxy logs, redirects and exception messages, a header does not.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {"x-goog-api-key": GEMINI_API_KEY}
 
     parts = [{"text": prompt}]
     if images:
@@ -110,7 +133,7 @@ def _call_gemini(model: str, prompt: str, images: list[Path] | None, temperature
         "generationConfig": {"temperature": temperature},
     }
 
-    resp = _request_with_retry("POST", url, json=body, timeout=CLOUD_TIMEOUT)
+    resp = _request_with_retry("POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT)
     data = resp.json()
 
     if "candidates" not in data or not data["candidates"]:
@@ -221,7 +244,12 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
                 print(f"  Rate limited. Waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
                 time.sleep(wait)
                 continue
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except requests.exceptions.HTTPError as exc:
+                # "from None" suppresses the chained original, whose message
+                # and traceback would carry the unredacted request back out.
+                raise RuntimeError(redact_secrets(str(exc))) from None
             return resp
         except requests.exceptions.Timeout:
             if attempt < MAX_RETRIES:
@@ -230,4 +258,4 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
                 time.sleep(wait)
                 continue
             raise
-    raise RuntimeError(f"All {MAX_RETRIES} retries exhausted for {url}")
+    raise RuntimeError(f"All {MAX_RETRIES} retries exhausted for {redact_secrets(url)}")

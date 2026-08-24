@@ -18,7 +18,6 @@ import argparse
 import json
 import re
 import sys
-from pathlib import Path
 
 from config import (
     TRANSCRIPTIONS_DIR,
@@ -31,7 +30,7 @@ from config import (
     provenance_meta,
     write_errors,
 )
-
+from markers import ILLEGIBLE, UNCERTAIN, strip_markers
 
 # ---------------------------------------------------------------------------
 # Phase 1 -- deterministic rule checks
@@ -43,14 +42,14 @@ def _count_pattern(text: str, pattern: str) -> int:
 
 def _rule_uncertain_markers(text: str) -> dict:
     """Count [?] markers that the transcription step inserted for low-confidence readings."""
-    count = _count_pattern(text, r"\[\?\]")
+    count = _count_pattern(text, UNCERTAIN)
     severity = "error" if count > 10 else "warning" if count > 3 else "info"
     return {"name": "uncertain_markers", "count": count, "severity": severity}
 
 
 def _rule_illegible_markers(text: str) -> dict:
     """Count [...] and [... ~N chars] markers for passages that could not be read."""
-    count = _count_pattern(text, r"\[\.\.\.(?:\s*~\d+\s*chars?)?\]")
+    count = _count_pattern(text, ILLEGIBLE)
     severity = "error" if count > 5 else "warning" if count > 1 else "info"
     return {"name": "illegible_markers", "count": count, "severity": severity}
 
@@ -60,9 +59,13 @@ def _rule_ocr_artifacts(text: str) -> dict:
 
     Looks for sequences of 3+ punctuation characters not part of standard
     conventions (ellipsis, dashes, repeated dots in a table of contents).
+    The edition-convention markers are removed first: [?] and the bracket
+    forms are punctuation clusters by shape, and counting them here would
+    report a correctly marked reading as machine noise.
     """
     # Match 3+ punctuation chars that are NOT just dots or dashes
-    count = _count_pattern(text, r"(?<!\.)(?<![—–-])[^\w\s.—–\-]{3,}(?![\.)—–-])")
+    scanned = strip_markers(text)
+    count = _count_pattern(scanned, r"(?<!\.)(?<![—–-])[^\w\s.—–\-]{3,}(?![\.)—–-])")
     severity = "error" if count > 3 else "warning" if count > 0 else "info"
     return {"name": "ocr_artifacts", "count": count, "severity": severity}
 
@@ -114,12 +117,22 @@ def run_deterministic(pages: list[dict]) -> tuple[list[dict], list[dict]]:
 # Phase 2 -- LLM judge (optional)
 # ---------------------------------------------------------------------------
 
+# Verdict placeholder for a page the judge could not be asked about. It is
+# not a confidence value of the judge's vocabulary and never counts as one.
+JUDGE_UNREVIEWED = "unreviewed"
+
+
 def run_llm_judge(pages: list[dict], prompt_template: str) -> list[dict]:
     """Send each page through the LLM validation judge.
 
     Import is deferred so the script works without network access when --no-llm.
+
+    A judge that could not be reached says nothing about the transcription,
+    so the page gets its own state (JUDGE_UNREVIEWED) instead of a negative
+    verdict. An answer that arrived but could not be parsed is a verdict the
+    judge failed to deliver and stays uncertain.
     """
-    from llm import call_llm, parse_json_response
+    from llm import call_llm, parse_json_response, redact_secrets
 
     results: list[dict] = []
     for p in pages:
@@ -145,15 +158,15 @@ def run_llm_judge(pages: list[dict], prompt_template: str) -> list[dict]:
                     "page": p.get("page", 0),
                     "confidence": "uncertain",
                     "issues": [],
-                    "summary": f"LLM response could not be parsed as JSON.",
+                    "summary": "LLM response could not be parsed as JSON.",
                     "_raw_response": raw[:500],
                 })
         except Exception as exc:
             results.append({
                 "page": p.get("page", 0),
-                "confidence": "uncertain",
+                "confidence": JUDGE_UNREVIEWED,
                 "issues": [],
-                "summary": f"LLM call failed: {exc}",
+                "summary": f"LLM judge not reached: {redact_secrets(str(exc))}",
             })
 
     return results
@@ -177,7 +190,9 @@ def compute_overall_status(
     The needs_review quality signal means "unverified transcription", not
     "serious reading errors" -- it maps to needs_review, never problematic.
     Pages gated as not transcribable (page_type gate_low_resolution) also
-    cap the status at needs_review so the data gap stays visible.
+    cap the status at needs_review so the data gap stays visible. A page the
+    judge could not be asked about is unverified in the same sense and caps
+    the status at needs_review rather than pulling it to problematic.
     """
     error_count = sum(1 for r in rules if r["severity"] == "error")
     warning_count = sum(1 for r in rules if r["severity"] == "warning")
@@ -190,6 +205,7 @@ def compute_overall_status(
     # Check LLM judge verdicts across all pages
     llm_uncertain = False
     llm_likely = False
+    llm_unreviewed = False
     if llm_pages:
         for lp in llm_pages:
             conf = lp.get("confidence", "")
@@ -197,11 +213,14 @@ def compute_overall_status(
                 llm_uncertain = True
             elif conf == "likely":
                 llm_likely = True
+            elif conf == JUDGE_UNREVIEWED:
+                llm_unreviewed = True
 
     # Decision tree
     if llm_uncertain or error_count > 2:
         return "problematic"
-    if llm_likely or warning_count > 0 or needs_review_from_signals or gate_pages > 0:
+    if (llm_likely or llm_unreviewed or warning_count > 0
+            or needs_review_from_signals or gate_pages > 0):
         return "needs_review"
     return "confident"
 
@@ -270,6 +289,9 @@ def validate_one(object_id: str, use_llm: bool, force: bool) -> dict | None:
 
     if llm_results is not None:
         output["validation"]["llm_judge"] = llm_results
+        unreviewed = sum(1 for r in llm_results if r.get("confidence") == JUDGE_UNREVIEWED)
+        if unreviewed:
+            output["validation"]["llm_judge_unreviewed_pages"] = unreviewed
 
     output["overall_status"] = overall
 
@@ -357,6 +379,10 @@ def main():
           f"{status_counts['needs_review']} needs_review, "
           f"{status_counts['problematic']} problematic, "
           f"{status_counts['failed']} failed.")
+
+    # Only processing errors fail the run; a problematic status is a finding.
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

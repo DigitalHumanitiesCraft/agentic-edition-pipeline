@@ -1,9 +1,10 @@
 """Generate TEI-XML from validated transcriptions.
 
-Deterministic mode builds well-formed TEI using string templates (no lxml
-builder) -- this keeps the output predictable and diffable. An optional LLM
-annotation pass can enrich the TEI with named entities and semantic markup,
-but only runs when ANNOTATION_PROVIDER is configured and --no-llm is not set.
+Generation is deterministic: well-formed TEI from string templates (no lxml
+builder), which keeps the output predictable and diffable. No model runs in
+this step, so it needs no API key, and the validation report documents the
+deterministic origin (operator decision, 2026-08-24). Entity annotation by a
+model is a separate concern and is not part of this script.
 
 Every generated file is validated for well-formedness and plaintext
 preservation. A validation report is written to results/reports/.
@@ -23,21 +24,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import (
-    ANNOTATION_MODEL,
-    ANNOTATION_PROVIDER,
     RESULTS_REPORTS_DIR,
     RESULTS_TEI_DIR,
     TEI_DIR,
     TRANSCRIPTIONS_DIR,
     VALIDATED_DIR,
     ensure_dirs,
-    load_prompt,
-    missing_api_key,
     provenance_meta,
     read_knowledge,
     write_errors,
 )
-
 
 # ---------------------------------------------------------------------------
 # XML escaping -- used throughout instead of an XML builder
@@ -375,7 +371,6 @@ def annotate_one(
     object_id: str,
     project: dict,
     validate_only: bool,
-    use_llm: bool,
     force: bool,
 ) -> dict | None:
     """Generate TEI for one object. Returns error dict on failure, None on success."""
@@ -407,13 +402,9 @@ def annotate_one(
     report = validate_tei(xml_str, pages)
     report["object_id"] = object_id
     report["source"] = str(src)
-    report["_meta"] = provenance_meta(
-        script="05_annotate_tei.py",
-        provider=ANNOTATION_PROVIDER if (use_llm and ANNOTATION_PROVIDER) else "",
-        model=ANNOTATION_MODEL if (use_llm and ANNOTATION_PROVIDER) else "",
-        prompt_template="annotation.md" if (use_llm and ANNOTATION_PROVIDER) else "",
-        step=5,
-    )
+    # No provider, model or prompt template: the TEI is generated
+    # deterministically, and the report says only what actually ran.
+    report["_meta"] = provenance_meta(script="05_annotate_tei.py", step=5)
 
     # Write validation report
     report_path = RESULTS_REPORTS_DIR / f"{object_id}_validation.json"
@@ -483,7 +474,8 @@ def main():
     group.add_argument("--object", metavar="ID", help="Process a single object by ID")
     group.add_argument("--all", action="store_true", help="Process all available objects")
     group.add_argument("--sample", metavar="N", type=int, help="Process first N objects (for testing)")
-    parser.add_argument("--no-llm", action="store_true", help="Skip LLM annotation enrichment")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Accepted for compatibility; generation is always deterministic")
     parser.add_argument("--validate-only", action="store_true", help="Generate and validate but do not write TEI")
     parser.add_argument("--force", action="store_true", help="Regenerate even if output exists")
     args = parser.parse_args()
@@ -494,30 +486,14 @@ def main():
     project_md = read_knowledge("01_PROJECT.md")
     project = _extract_project_info(project_md)
 
-    use_llm = not args.no_llm
-
-    # Fail fast when LLM enrichment is requested but its key is missing.
-    # Deterministic mode (empty ANNOTATION_PROVIDER or --no-llm) needs no key.
-    if use_llm and ANNOTATION_PROVIDER:
-        missing = missing_api_key(ANNOTATION_PROVIDER)
-        if missing:
-            print(
-                f"ERROR: no API key configured, this step requires one. "
-                f"Set {missing} in .env for provider '{ANNOTATION_PROVIDER}', "
-                f"or run with --no-llm for deterministic TEI generation.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
     objects = collect_objects(args.object, args.all, args.sample)
 
     mode = "validate-only" if args.validate_only else "deterministic"
-    if use_llm and ANNOTATION_PROVIDER:
-        mode += f" + LLM ({ANNOTATION_PROVIDER}/{ANNOTATION_MODEL})"
     print(f"Generating TEI for {len(objects)} object(s) [{mode}]\n")
 
     errors: list[dict] = []
     for oid in objects:
-        err = annotate_one(oid, project, args.validate_only, use_llm, args.force)
+        err = annotate_one(oid, project, args.validate_only, args.force)
         if err:
             errors.append(err)
             print(f"  FAIL {err['object_id']}: {err['error']}")
@@ -528,6 +504,10 @@ def main():
 
     ok = len(objects) - len(errors)
     print(f"\nDone. {len(objects)} object(s): {ok} succeeded, {len(errors)} failed.")
+
+    # An object whose TEI could not be produced is a failed run, not a result.
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

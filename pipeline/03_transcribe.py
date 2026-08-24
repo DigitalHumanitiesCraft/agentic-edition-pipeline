@@ -18,13 +18,14 @@ import sys
 import time
 from pathlib import Path
 
+import contract
 from config import (
     BATCH_DELAY,
     CHUNK_SIZE,
     DATA_DIR,
-    TRANSCRIPTIONS_DIR,
     TRANSCRIPTION_MODEL,
     TRANSCRIPTION_PROVIDER,
+    TRANSCRIPTIONS_DIR,
     ensure_dirs,
     list_page_images,
     load_prompt,
@@ -33,7 +34,7 @@ from config import (
     resolve_image_dir,
     write_errors,
 )
-from llm import call_llm, parse_json_response
+from llm import call_llm, parse_json_response, redact_secrets
 
 INVENTORY_PATH = DATA_DIR / "inventory.json"
 
@@ -93,27 +94,54 @@ def transcribe_chunk(
     return result
 
 
+# Contract vocabulary of the confidence field, weakest first. A merge across
+# chunks keeps the weakest declared value, because a document is only as
+# reliable as its worst chunk.
+CONFIDENCE_ORDER = ("low", "medium", "high")
+
+
+def _worst_confidence(chunks: list[dict]) -> str:
+    """The weakest confidence value any chunk declared, or "" if none did."""
+    declared = [
+        chunk["confidence"].lower()
+        for chunk in chunks
+        if isinstance(chunk.get("confidence"), str)
+        and chunk["confidence"].lower() in CONFIDENCE_ORDER
+    ]
+    if not declared:
+        return ""
+    return min(declared, key=CONFIDENCE_ORDER.index)
+
+
 def merge_chunks(chunks: list[dict]) -> dict:
     """Merge transcription results from multiple chunks into one document.
 
-    Concatenates page arrays. Confidence is the minimum across all chunks
-    (worst-case represents overall reliability).
+    Page arrays concatenate. Object-level fields describe the document rather
+    than the chunk: metadata comes from the first chunk that carries it, the
+    confidence notes of all chunks are kept, and confidence stays in the
+    string vocabulary of the data contract instead of becoming a number.
     """
+    chunks = [chunk for chunk in chunks if isinstance(chunk, dict)]
+
     merged_pages: list[dict] = []
-    worst_confidence: float = 1.0
+    metadata: dict = {}
+    notes: list[str] = []
 
     for chunk in chunks:
-        if isinstance(chunk, dict):
-            pages = chunk.get("pages", [])
-            if isinstance(pages, list):
-                merged_pages.extend(pages)
-            conf = chunk.get("confidence", 1.0)
-            if isinstance(conf, (int, float)):
-                worst_confidence = min(worst_confidence, conf)
+        pages = chunk.get("pages", [])
+        if isinstance(pages, list):
+            merged_pages.extend(pages)
+        if not metadata and isinstance(chunk.get("metadata"), dict):
+            metadata = chunk["metadata"]
+        note = chunk.get("confidence_notes", "")
+        if isinstance(note, str) and note.strip():
+            notes.append(note.strip())
 
     return {
+        "metadata": metadata,
         "pages": merged_pages,
-        "confidence": worst_confidence,
+        "confidence": _worst_confidence(chunks),
+        "confidence_notes": "\n".join(notes),
     }
 
 
@@ -224,7 +252,19 @@ def transcribe_document(
             result = merge_chunks(chunk_results)
 
     except Exception as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "api_call"}
+        return {"object_id": doc_id, "error": redact_secrets(str(exc)), "stage": "api_call"}
+
+    # Contract gate before writing: an answer without a usable pages structure
+    # would otherwise produce a file that claims an empty but reviewed
+    # transcription (needs_review false), which no later step can distinguish
+    # from a genuinely blank document.
+    violations = contract.response_violations(result)
+    if violations:
+        return {
+            "object_id": doc_id,
+            "error": "Model response violates the data contract: " + "; ".join(violations),
+            "stage": "contract",
+        }
 
     quality = compute_quality_signals(result, len(images))
 
@@ -349,6 +389,10 @@ def main():
 
     succeeded = len(docs) - len(errors)
     print(f"\nDone. {succeeded}/{len(docs)} document(s) transcribed successfully.")
+
+    # A document that could not be processed is a failed run, not a result.
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

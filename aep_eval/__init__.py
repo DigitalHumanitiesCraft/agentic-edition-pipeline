@@ -5,9 +5,9 @@ normalisation profiles and checks TEI files against an explicitly named
 RelaxNG schema; writes one result set as JSON and Markdown. Inputs are read
 only, nothing in a fixture repository is touched.
 
-Contract: codex/knowledge/aep-evaluation.md of the wiorking workspace
-("Verbindlicher Implementierungsvertrag v0.1"); decision ADR-006 in
-knowledge/decisions.md. Usage: `python -m aep_eval MANIFEST --out DIR`.
+Contract: decision ADR-006 in knowledge/decisions.md, which records the
+implementation contract, the two profiles and their regression anchors.
+Usage: `python -m aep_eval MANIFEST --out DIR`.
 """
 
 from __future__ import annotations

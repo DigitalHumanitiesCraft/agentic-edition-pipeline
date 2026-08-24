@@ -17,8 +17,8 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 from config import (
-    IMAGES_DIR,
     IMAGE_DPI,
+    IMAGES_DIR,
     SOURCES_DIR,
     ensure_dirs,
     provenance_meta,

@@ -242,8 +242,12 @@ def process_tei(tei_path: Path) -> dict | None:
     }
 
 
-def build_all(force: bool):
-    """Scan all TEI files and generate frontend data."""
+def build_all(force: bool) -> list[str]:
+    """Scan all TEI files and generate frontend data.
+
+    Returns the ids of the files that could not be processed, so a silently
+    missing object does not look like a clean build.
+    """
     tei_files = sorted(RESULTS_TEI_DIR.glob("*.xml"))
     if not tei_files:
         print(f"No TEI files found in {RESULTS_TEI_DIR}", file=sys.stderr)
@@ -255,6 +259,7 @@ def build_all(force: bool):
     project_name = _extract_project_name(project_md)
 
     catalog_objects: list[dict] = []
+    failed: list[str] = []
 
     for tei_path in tei_files:
         dst = DOCS_DATA_DIR / f"{tei_path.stem}.json"
@@ -277,6 +282,7 @@ def build_all(force: bool):
 
         data = process_tei(tei_path)
         if data is None:
+            failed.append(tei_path.stem)
             continue
 
         # Write per-object JSON
@@ -301,6 +307,7 @@ def build_all(force: bool):
     catalog_path = DOCS_DATA_DIR / "catalog.json"
     catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nCatalog written to {catalog_path} ({len(catalog_objects)} objects)")
+    return failed
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +341,14 @@ def main():
     args = parser.parse_args()
 
     ensure_dirs()
-    build_all(args.force)
+    failed = build_all(args.force)
+
+    # A TEI file that could not be read leaves a hole in the published data,
+    # so the run fails instead of serving an incomplete edition.
+    if failed:
+        print(f"\nERROR: {len(failed)} TEI file(s) could not be processed: "
+              f"{', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
 
     if args.serve:
         serve()

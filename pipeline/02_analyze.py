@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from config import (
@@ -22,6 +21,7 @@ from config import (
     PROCESSED_DIR,
     SOURCES_DIR,
     ensure_dirs,
+    list_page_images,
     provenance_meta,
 )
 
@@ -105,11 +105,19 @@ def scan_sources() -> dict[str, dict]:
     return documents
 
 
+def _dominant_format(doc_dir: Path) -> str:
+    """File extension of the first page image in a directory, without the dot."""
+    images = list_page_images(doc_dir)
+    return images[0].suffix.lstrip(".") if images else "png"
+
+
 def scan_extracted_images(documents: dict[str, dict]) -> dict[str, dict]:
     """Augment documents with info from data/processed/images/ (extracted PDFs).
 
     Each subdirectory under IMAGES_DIR corresponds to a document. If a manifest
-    exists, use it for page count; otherwise count PNGs.
+    exists, use it for page count; otherwise count the page images. The image
+    type follows the directory, because PDF extraction writes PNG while
+    fetch_facsimiles.py writes JPG.
     """
     if not IMAGES_DIR.exists():
         return documents
@@ -126,9 +134,9 @@ def scan_extracted_images(documents: dict[str, dict]) -> dict[str, dict]:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 page_count = len(manifest.get("pages", []))
             except (json.JSONDecodeError, KeyError):
-                page_count = len(list(doc_dir.glob("*.png")))
+                page_count = len(list_page_images(doc_dir))
         else:
-            page_count = len(list(doc_dir.glob("*.png")))
+            page_count = len(list_page_images(doc_dir))
 
         if doc_id in documents:
             # Update existing entry with extracted image info
@@ -139,9 +147,9 @@ def scan_extracted_images(documents: dict[str, dict]) -> dict[str, dict]:
                 "id": doc_id,
                 "source_type": "extracted_image",
                 "pages": page_count,
-                "format": "png",
+                "format": _dominant_format(doc_dir),
                 "path": str(doc_dir.relative_to(PROCESSED_DIR)),
-                "files": [f.name for f in sorted(doc_dir.glob("*.png"))],
+                "files": [f.name for f in list_page_images(doc_dir)],
             }
 
     return documents
@@ -188,8 +196,8 @@ def build_inventory(documents: dict[str, dict]) -> dict:
 def inventory_to_markdown(inventory: dict) -> str:
     s = inventory["summary"]
     lines = [
-        f"| Eigenschaft | Wert |",
-        f"|---|---|",
+        "| Eigenschaft | Wert |",
+        "|---|---|",
         f"| Dokumente gesamt | {s['total_documents']} |",
         f"| Seiten gesamt | {s['total_pages']} |",
         f"| Quellentypen | {', '.join(f'{k} ({v})' for k, v in s['source_types'].items())} |",
