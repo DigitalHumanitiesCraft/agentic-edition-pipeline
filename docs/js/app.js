@@ -182,12 +182,9 @@
   }
 
   // -- Downloads --
-  // Note: TEI download links to results/tei/ which is outside docs/. On GitHub
-  // Pages this path is not deployed. It works in local development or when TEI
-  // files are copied into docs/data/. Adjust the path as needed for your setup.
   function downloadTEI(id) {
     var a = document.createElement("a");
-    a.href = "results/tei/" + id + ".xml"; a.download = id + ".xml";
+    a.href = "tei/" + encodeURIComponent(id) + ".xml"; a.download = id + ".xml";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
   function exportPlaintext(id) {

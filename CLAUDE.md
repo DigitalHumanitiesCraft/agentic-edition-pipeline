@@ -130,7 +130,7 @@ Process:
 
 - **Script** `pipeline/06_build_frontend.py`
 - **Reads** `results/tei/`, `knowledge/05_DESIGN.md`
-- **Writes** `docs/`
+- **Writes** `docs/data/`, `docs/tei/`, `docs/images/`
 - **Context** `knowledge/01_PROJECT.md`, `knowledge/05_DESIGN.md`
 
 Build the frontend based on the components and wireframes defined in `05_DESIGN.md`. Standard components (catalog, search, document view, TEI download, plaintext export) are always included. Research-specific components (concordance, timeline, specialised registers) are only implemented when defined in the user stories.

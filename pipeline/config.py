@@ -31,6 +31,7 @@ PROMPTS_DIR = SCRIPT_DIR / "prompts"
 SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 DOCS_DIR = PROJECT_ROOT / "docs"
 DOCS_DATA_DIR = DOCS_DIR / "data"
+DOCS_TEI_DIR = DOCS_DIR / "tei"
 
 # --- TEI validation target (ADR-005) ---
 # Per-fork choice: point this at the RelaxNG schema your project validates
@@ -63,7 +64,7 @@ IMAGE_DPI = int(os.environ.get("IMAGE_DPI", "150"))
 def ensure_dirs():
     """Create all output directories if they do not exist."""
     for d in [IMAGES_DIR, TRANSCRIPTIONS_DIR, VALIDATED_DIR, TEI_DIR,
-              RESULTS_TEI_DIR, RESULTS_REPORTS_DIR, DOCS_DATA_DIR]:
+              RESULTS_TEI_DIR, RESULTS_REPORTS_DIR, DOCS_DATA_DIR, DOCS_TEI_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 

@@ -9,10 +9,12 @@ import json
 import sys
 
 import pytest
+from lxml import etree
 
 from conftest import load_step
 
 step5 = load_step("05_annotate_tei")
+config = load_step("config")
 
 
 def _prepare_dirs(monkeypatch, tmp_path):
@@ -46,6 +48,73 @@ def test_report_meta_documents_deterministic_generation(
     assert "provider" not in report["_meta"]
     assert "model" not in report["_meta"]
     assert "prompt_template" not in report["_meta"]
+
+
+def test_header_maps_object_date_and_repository(
+    monkeypatch, tmp_path, fixture_transcription
+):
+    dirs = _prepare_dirs(monkeypatch, tmp_path)
+    (dirs["validated"] / "fixture1.json").write_text(
+        json.dumps(fixture_transcription, ensure_ascii=False), encoding="utf-8"
+    )
+
+    assert step5.annotate_one("fixture1", {}, validate_only=False, force=True) is None
+
+    namespace = {"tei": "http://www.tei-c.org/ns/1.0"}
+    root = etree.parse(str(dirs["results_tei"] / "fixture1.xml"))
+    date = root.find(".//tei:origDate", namespace)
+    assert date is not None
+    assert date.get("when") == "1901-05-22"
+    assert date.text == "1901-05-22"
+    assert root.findtext(".//tei:repository", namespaces=namespace) == "Example Archive"
+
+
+@pytest.mark.parametrize(
+    ("date_value", "expected_when"),
+    [
+        ("1901-03", "1901-03"),
+        ("ca. 1901", None),
+        ("1901/03/12", None),
+    ],
+)
+def test_header_only_normalizes_valid_tei_dates(
+    monkeypatch, tmp_path, fixture_transcription, date_value, expected_when
+):
+    dirs = _prepare_dirs(monkeypatch, tmp_path)
+    fixture_transcription["metadata"]["date"] = date_value
+    (dirs["validated"] / "fixture1.json").write_text(
+        json.dumps(fixture_transcription, ensure_ascii=False), encoding="utf-8"
+    )
+
+    assert step5.annotate_one("fixture1", {}, validate_only=False, force=True) is None
+
+    namespace = {"tei": "http://www.tei-c.org/ns/1.0"}
+    root = etree.parse(str(dirs["results_tei"] / "fixture1.xml"))
+    date = root.find(".//tei:origDate", namespace)
+    assert date is not None
+    assert date.text == date_value
+    assert date.get("when") == expected_when
+    etree.RelaxNG(etree.parse(str(config.VALIDATION_SCHEMA))).assertValid(root)
+
+
+def test_header_escapes_free_text_date(monkeypatch, tmp_path, fixture_transcription):
+    dirs = _prepare_dirs(monkeypatch, tmp_path)
+    date_value = 'ca. 1901 & before <revision> "A"'
+    fixture_transcription["metadata"]["date"] = date_value
+    (dirs["validated"] / "fixture1.json").write_text(
+        json.dumps(fixture_transcription, ensure_ascii=False), encoding="utf-8"
+    )
+
+    assert step5.annotate_one("fixture1", {}, validate_only=False, force=True) is None
+
+    namespace = {"tei": "http://www.tei-c.org/ns/1.0"}
+    tei_path = dirs["results_tei"] / "fixture1.xml"
+    root = etree.parse(str(tei_path))
+    date = root.find(".//tei:origDate", namespace)
+    assert date is not None
+    assert date.text == date_value
+    assert date.get("when") is None
+    etree.RelaxNG(etree.parse(str(config.VALIDATION_SCHEMA))).assertValid(root)
 
 
 def test_main_exits_nonzero_on_a_processing_error(monkeypatch, tmp_path):

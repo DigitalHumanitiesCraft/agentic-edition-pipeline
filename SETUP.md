@@ -2,6 +2,8 @@
 
 This file guides you through adapting the template for your own edition project. Work through it top to bottom. Each section identifies a configuration point and tells you exactly which file to open and what to fill in. When done, delete or archive this file.
 
+To verify the installed dependencies and deterministic pipeline before editing the template, run `python examples/offline-quickstart/run.py`. The synthetic example needs no provider key, writes to `.aep-quickstart/`, and leaves the project knowledge and corpus directories unchanged. Its scope, preview command, and fail-closed replacement rules are documented in `examples/offline-quickstart/README.md`.
+
 ---
 
 ## 1. Fork and clone
@@ -162,7 +164,7 @@ To set or change the target:
 
 The frontend in `docs/` is a static Vanilla JS curation frontend with no build step. Its facsimile-text comparison view is where you verify transcription and annotation quality against the original images; the published edition uses the same interface.
 
-The HTML title in `docs/index.html` is set manually. Open the file and edit the `<title>` element and the `<h1>` heading to your project name. The build script `pipeline/06_build_frontend.py` never touches `docs/index.html`; it only generates the data layer in `docs/data/`. The title is left manual on purpose. `index.html` is a hand-maintained file, and doing string replacement in it on every build would break idempotency and risk overwriting manual edits to the surrounding markup. The same applies to any footer text you want to differ from the knowledge document.
+The HTML title in `docs/index.html` is set manually. Open the file and edit the `<title>` element and the `<h1>` heading to your project name. The build script `pipeline/06_build_frontend.py` leaves `docs/index.html` unchanged. It generates the data layer in `docs/data/` and copies publication TEI into `docs/tei/`, which makes the viewer's download button work under the same static serving root. The title remains manual because `index.html` is hand-maintained and repeated string replacement would risk overwriting edits to the surrounding markup. The same applies to footer text that differs from the knowledge document.
 
 To add research-specific UI components (e.g. a timeline, a concordance, a named-entity register), fill in `knowledge/05_DESIGN.md` before running step 6. Claude Code derives the component list from that document and implements only what is specified there.
 

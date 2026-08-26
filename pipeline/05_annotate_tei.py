@@ -20,6 +20,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import date as calendar_date
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,6 +51,27 @@ def _esc(text: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def _date_when(value: str) -> str:
+    """Return a validated TEI/W3C date value, or empty for free-text dates."""
+    year_match = re.fullmatch(r"([0-9]{4})", value)
+    if year_match:
+        year = int(year_match.group(1))
+        return value if 1 <= year <= 9999 else ""
+
+    month_match = re.fullmatch(r"([0-9]{4})-([0-9]{2})", value)
+    if month_match:
+        year, month = (int(part) for part in month_match.groups())
+        return value if 1 <= year <= 9999 and 1 <= month <= 12 else ""
+
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        return ""
+    try:
+        calendar_date.fromisoformat(value)
+    except ValueError:
+        return ""
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +132,10 @@ def _build_tei_header(
     publisher = _esc(project.get("publisher", ""))
     license_text = _esc(project.get("license", ""))
     lang = _esc(language or doc_meta.get("language", "de"))
+    repository = _esc(doc_meta.get("repository", ""))
+    date_value = str(doc_meta.get("date", "") or "")
+    date = _esc(date_value)
+    date_when = _esc(_date_when(date_value))
     timestamp = datetime.now(timezone.utc).isoformat()
 
     lines = [
@@ -135,8 +161,27 @@ def _build_tei_header(
         "      <sourceDesc>",
         "        <msDesc>",
         "          <msIdentifier>",
+    ]
+    if repository:
+        lines.append(f"            <repository>{repository}</repository>")
+    lines += [
         f"            <idno>{_esc(object_id)}</idno>",
         "          </msIdentifier>",
+    ]
+    if date:
+        orig_date = (
+            f'<origDate when="{date_when}">{date}</origDate>'
+            if date_when
+            else f"<origDate>{date}</origDate>"
+        )
+        lines += [
+            "          <history>",
+            "            <origin>",
+            f"              {orig_date}",
+            "            </origin>",
+            "          </history>",
+        ]
+    lines += [
         "        </msDesc>",
         "      </sourceDesc>",
         "    </fileDesc>",

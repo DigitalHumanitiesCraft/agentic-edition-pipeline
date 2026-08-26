@@ -8,15 +8,19 @@ generates the data layer.
 Outputs:
   docs/data/catalog.json   -- project-level index of all objects
   docs/data/{object_id}.json -- per-object data with pages, text, image paths
+  docs/tei/{object_id}.xml -- downloadable publication copy
 """
 from __future__ import annotations
 
 import argparse
 import http.server
 import json
+import os
 import re
 import shutil
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 from lxml import etree
@@ -24,6 +28,8 @@ from lxml import etree
 from config import (
     DOCS_DATA_DIR,
     DOCS_DIR,
+    DOCS_TEI_DIR,
+    PROJECT_ROOT,
     RESULTS_TEI_DIR,
     ensure_dirs,
     list_page_images,
@@ -242,6 +248,145 @@ def process_tei(tei_path: Path) -> dict | None:
     }
 
 
+def _copy_tei_asset(tei_path: Path) -> None:
+    """Copy the canonical TEI into the static publication root."""
+    publication_dir = _validated_tei_publication_dir()
+    publication_dir.mkdir(parents=True, exist_ok=True)
+    publication_dir = _validated_tei_publication_dir()
+    destination = publication_dir / tei_path.name
+    legacy_temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+    destination_exists = _validate_publication_file(destination, publication_dir)
+    if _validate_publication_file(legacy_temporary, publication_dir):
+        legacy_temporary.unlink()
+    try:
+        if destination_exists and destination.read_bytes() == tei_path.read_bytes():
+            return
+    except OSError:
+        pass
+
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{tei_path.name}.", suffix=".tmp", dir=publication_dir
+    )
+    temporary = Path(temporary_name)
+    try:
+        _validate_publication_file(temporary, publication_dir)
+        with os.fdopen(file_descriptor, "wb") as target_handle:
+            file_descriptor = -1
+            with tei_path.open("rb") as source_handle:
+                shutil.copyfileobj(source_handle, target_handle)
+            target_handle.flush()
+            os.fsync(target_handle.fileno())
+
+        _validated_tei_publication_dir()
+        _validate_publication_file(destination, publication_dir)
+        _validate_publication_file(temporary, publication_dir)
+        temporary.replace(destination)
+    except Exception:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        try:
+            if _validate_publication_file(temporary, publication_dir):
+                temporary.unlink()
+        except (OSError, ValueError):
+            pass
+        raise
+
+
+def _publish_tei_asset(tei_path: Path) -> None:
+    """Publish one TEI asset and report filesystem failures before raising."""
+    try:
+        _copy_tei_asset(tei_path)
+    except OSError as exc:
+        print(f"  FAIL {tei_path.stem} (TEI publication copy: {exc})", file=sys.stderr)
+        raise
+
+
+def _is_well_formed_tei(tei_path: Path) -> bool:
+    """Check a skipped TEI before exposing it as a download asset."""
+    try:
+        etree.parse(str(tei_path))
+    except etree.XMLSyntaxError as exc:
+        print(f"  SKIP {tei_path.stem} (XML parse error: {exc})")
+        return False
+    return True
+
+
+def _is_link_or_reparse_point(path: Path) -> bool:
+    """Inspect one existing path component without following it."""
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(path_stat, "st_file_attributes", 0)
+    return stat.S_ISLNK(path_stat.st_mode) or bool(reparse_flag & attributes)
+
+
+def _validate_publication_file(path: Path, publication_dir: Path) -> bool:
+    """Validate one publication file by lstat without following links."""
+    if path.parent != publication_dir:
+        raise ValueError(f"publication file escaped its directory: {path}")
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(path_stat, "st_file_attributes", 0)
+    if stat.S_ISLNK(path_stat.st_mode) or bool(reparse_flag & attributes):
+        raise ValueError(
+            f"refusing TEI publication file through symlink or reparse point: {path}"
+        )
+    if not stat.S_ISREG(path_stat.st_mode):
+        raise ValueError(f"TEI publication path is not a regular file: {path}")
+    return True
+
+
+def _validated_tei_publication_dir() -> Path:
+    """Return docs/tei only when its complete repository path is trustworthy."""
+    project_root = PROJECT_ROOT.absolute()
+    docs_root = DOCS_DIR.absolute()
+    publication_dir = DOCS_TEI_DIR.absolute()
+
+    if docs_root == project_root or project_root not in docs_root.parents:
+        raise ValueError(f"docs directory is outside the project root: {docs_root}")
+    if publication_dir == docs_root or docs_root not in publication_dir.parents:
+        raise ValueError(
+            f"TEI publication directory is outside the docs root: {publication_dir}"
+        )
+
+    current = publication_dir
+    while True:
+        if _is_link_or_reparse_point(current):
+            raise ValueError(
+                f"refusing TEI publication through symlink or reparse point: {current}"
+            )
+        if current == project_root:
+            break
+        current = current.parent
+
+    resolved_project = project_root.resolve()
+    resolved_docs = docs_root.resolve()
+    resolved_publication = publication_dir.resolve()
+    if resolved_project not in resolved_docs.parents:
+        raise ValueError(f"resolved docs directory escaped the project root: {docs_root}")
+    if resolved_docs not in resolved_publication.parents:
+        raise ValueError(
+            f"resolved TEI publication directory escaped the docs root: {publication_dir}"
+        )
+    return resolved_publication
+
+
+def _remove_stale_tei_assets(published_names: set[str]) -> None:
+    """Remove downloads that have no successfully processed source in this build."""
+    publication_dir = _validated_tei_publication_dir()
+    publication_dir.mkdir(parents=True, exist_ok=True)
+    publication_dir = _validated_tei_publication_dir()
+    for asset in publication_dir.glob("*.xml"):
+        if asset.name not in published_names:
+            _validated_tei_publication_dir()
+            asset.unlink()
+
+
 def build_all(force: bool) -> list[str]:
     """Scan all TEI files and generate frontend data.
 
@@ -250,8 +395,11 @@ def build_all(force: bool) -> list[str]:
     """
     tei_files = sorted(RESULTS_TEI_DIR.glob("*.xml"))
     if not tei_files:
+        _remove_stale_tei_assets(set())
         print(f"No TEI files found in {RESULTS_TEI_DIR}", file=sys.stderr)
         sys.exit(1)
+
+    _remove_stale_tei_assets({tei_path.name for tei_path in tei_files})
 
     print(f"Building frontend data from {len(tei_files)} TEI file(s)\n")
 
@@ -260,30 +408,43 @@ def build_all(force: bool) -> list[str]:
 
     catalog_objects: list[dict] = []
     failed: list[str] = []
+    published_tei_names: set[str] = set()
 
     for tei_path in tei_files:
         dst = DOCS_DATA_DIR / f"{tei_path.stem}.json"
         if dst.exists() and not force:
             print(f"  SKIP {tei_path.stem} (exists, use --force)")
-            # Still include in catalog from existing file
+            if not _is_well_formed_tei(tei_path):
+                failed.append(tei_path.stem)
+                continue
             try:
                 existing = json.loads(dst.read_text(encoding="utf-8"))
-                catalog_objects.append({
+                if not isinstance(existing, dict):
+                    raise TypeError("expected a JSON object")
+                catalog_item = {
                     "id": existing["id"],
                     "title": existing.get("title", ""),
                     "date": existing.get("date", ""),
                     "language": existing.get("language", ""),
                     "page_count": len(existing.get("pages", [])),
                     "has_images": existing.get("has_images", False),
-                })
-            except Exception:
-                pass
+                }
+            except (json.JSONDecodeError, KeyError, OSError, TypeError) as exc:
+                print(f"  FAIL {tei_path.stem} (existing frontend data: {exc})")
+                failed.append(tei_path.stem)
+                continue
+            catalog_objects.append(catalog_item)
+            _publish_tei_asset(tei_path)
+            published_tei_names.add(tei_path.name)
             continue
 
         data = process_tei(tei_path)
         if data is None:
             failed.append(tei_path.stem)
             continue
+
+        _publish_tei_asset(tei_path)
+        published_tei_names.add(tei_path.name)
 
         # Write per-object JSON
         dst.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -297,6 +458,8 @@ def build_all(force: bool) -> list[str]:
             "page_count": len(data["pages"]),
             "has_images": data["has_images"],
         })
+
+    _remove_stale_tei_assets(published_tei_names)
 
     # Write catalog
     catalog = {

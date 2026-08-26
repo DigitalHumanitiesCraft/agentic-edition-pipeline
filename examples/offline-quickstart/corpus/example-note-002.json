@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "script": "offline_quickstart_fixture",
+    "timestamp": "2026-08-26T00:00:00+00:00",
+    "pipeline_step": 3
+  },
+  "object_id": "example-note-002",
+  "source_images": [],
+  "metadata": {
+    "title": "Inventory note for box 3",
+    "language": "en",
+    "date": "1901-03-13",
+    "object_type": "inventory note",
+    "repository": "Synthetic example corpus"
+  },
+  "pages": [
+    {
+      "page": 1,
+      "transcription": "Inventory note\n\nBox 3 contains two letters and one envelope. The enclosure belongs with the first letter.",
+      "notes": "",
+      "page_type": "",
+      "foreign_paragraphs": []
+    }
+  ],
+  "confidence": "high",
+  "confidence_notes": "Synthetic transcription supplied as an offline fixture.",
+  "quality_signals": {
+    "page_types": ["content"],
+    "total_chars": 105,
+    "chars_per_page": 105.0,
+    "blank_pages": 0,
+    "gate_pages": 0,
+    "foreign_pages": 0,
+    "content_pages": 1,
+    "needs_review": false
+  }
+}

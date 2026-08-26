@@ -26,6 +26,7 @@ def fixture_transcription() -> dict:
             "language": "fr",
             "date": "1901-05-22",
             "object_type": "Korrespondenz",
+            "repository": "Example Archive",
             "image_urls": {
                 "1": "https://example.org/o:fixture1/IMG.1",
                 "2": "https://example.org/o:fixture1/IMG.2",

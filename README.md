@@ -22,6 +22,16 @@ The reference projects listed further below are the production repositories this
 - [Claude Code](https://claude.ai/code) (Anthropic's agentic coding tool)
 - An API key for at least one LLM provider (Gemini, OpenAI, Anthropic, or a local Ollama instance). Steps 4 (validation) and 5 (TEI annotation) run without API keys in deterministic mode.
 
+### Offline quickstart
+
+The repository includes a synthetic two-document corpus that exercises the deterministic path without an API key or network access. It creates an isolated local project under `.aep-quickstart/`, runs steps 4 and 5, validates the generated TEI against the shipped TEI All schema, and builds the static frontend.
+
+```console
+python examples/offline-quickstart/run.py
+```
+
+The command leaves the template knowledge skeleton and working data unchanged. Recursive replacement through `--force` requires the runner's intact, path-bound ownership marker for every non-empty target, including the canonical `.aep-quickstart/` directory. See [`examples/offline-quickstart/README.md`](examples/offline-quickstart/README.md) for the generated files, preview command, target-safety rules, and verification scope.
+
 ### Step-by-step
 
 1. **Fork** this repository on GitHub using **Use this template**, or fork it directly.
@@ -164,7 +174,7 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Plaintext preservation.** After generation, the script computes word-set similarity between the source transcription and the generated TEI body. Similarity below 0.95 triggers a warning; below 0.80 is flagged as low. This check catches annotation errors where the model altered the text content.
 
-**Structure.** Deterministic TEI splits page text on blank lines into `<p>` elements; within a paragraph, line breaks become `<lb/>` unless the edition type in `knowledge/01_PROJECT.md` is normalised. Remote facsimile URLs from `metadata.image_urls` produce a `<facsimile>` block with `graphic url`, referenced from `<pb facs="#facs_N"/>`. Page-level fields from the data contract are honoured: foreign text becomes `<note type="foreign">`, quality-gated pages get `<note type="gate">`, and empty pages without a declared `page_type` are marked `<note type="empty">` for verification.
+**Structure.** Deterministic TEI splits page text on blank lines into `<p>` elements; within a paragraph, line breaks become `<lb/>` unless the edition type in `knowledge/01_PROJECT.md` is normalised. Object dates and repositories become `origDate` and `repository` in the source description. Remote facsimile URLs from `metadata.image_urls` produce a `<facsimile>` block with `graphic url`, referenced from `<pb facs="#facs_N"/>`. Page-level fields from the data contract are honoured: foreign text becomes `<note type="foreign">`, quality-gated pages get `<note type="gate">`, and empty pages without a declared `page_type` are marked `<note type="empty">` for verification.
 
 **Known limits.** Complex layouts (nested tables, verse, apparatus) require LLM enrichment and project-specific mapping rules. The LLM enrichment pass does not yet support cross-document entity resolution; each document is annotated independently.
 
@@ -188,7 +198,7 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Input.** `results/tei/*.xml`, `knowledge/01_PROJECT.md`, `knowledge/05_DESIGN.md`
 
-**Output.** `docs/data/catalog.json` (project-level index), `docs/data/{doc_id}.json` (per-document data with pages, text, image paths). Local facsimiles resolved via the shared image root are copied to `docs/images/{doc_id}/` so the static site can serve them; remote facsimile URLs from the TEI `<facsimile>` block are rendered directly. `has_images` reflects what the viewer can actually show. The frontend HTML/CSS/JS in `docs/` is static and pre-existing; this step fills `docs/data/` and `docs/images/`.
+**Output.** `docs/data/catalog.json` (project-level index), `docs/data/{doc_id}.json` (per-document data with pages, text, image paths), and `docs/tei/{doc_id}.xml` (downloadable TEI). Local facsimiles resolved via the shared image root are copied to `docs/images/{doc_id}/` so the static site can serve them; remote facsimile URLs from the TEI `<facsimile>` block are rendered directly. `has_images` reflects what the viewer can actually show. The frontend HTML/CSS/JS in `docs/` is static and pre-existing; this step fills its publication assets.
 
 **Key parameters.** `--force` (regenerate all data files), `--serve` (start local HTTP server on port 8080).
 
@@ -222,6 +232,7 @@ agentic-edition-pipeline/
 │   └── prompts/                 # Prompt templates (transcription, validation, annotation)
 ├── schemas/                     # DTABf encoding profile (JSON) + official RelaxNG, see schemas/README.md
 ├── tests/                       # Pytest checks for the data contract and TEI generation
+├── examples/offline-quickstart/ # Synthetic corpus and isolated offline runner
 ├── docs/                        # Static curation frontend (GitHub Pages root)
 ├── data/sources/                # Input data (your source material)
 ├── data/processed/              # Intermediate results (generated)

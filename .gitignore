@@ -37,6 +37,9 @@ results/**
 docs/data/**
 !docs/data/.gitkeep
 
+# Isolated output of the synthetic offline quickstart
+.aep-quickstart/
+
 # Facsimiles copied into docs/ by step 6 are needed for GitHub Pages
 # (deploy from branch serves committed files only), so docs/images/ is
 # deliberately NOT ignored.
