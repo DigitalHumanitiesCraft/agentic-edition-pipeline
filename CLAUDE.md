@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This repository is a forkable template for AI-assisted digital scholarly editions. Claude Code operates the pipeline, the human is the Critical Expert in the Loop.
+This repository is the 0.9 pre-release of a forkable template for AI-assisted digital scholarly editions. Claude Code operates the pipeline, the human is the Critical Expert in the Loop.
 
 **Session start.** Read `knowledge/00_INDEX.md` first. It maps which knowledge documents are relevant for each pipeline step. If `knowledge/01_PROJECT.md` still contains `[TODO]` placeholders, read `SETUP.md` and walk the human through the configuration points before touching any pipeline script.
 
@@ -11,10 +11,10 @@ This repository is a forkable template for AI-assisted digital scholarly edition
 - ALWAYS log date, objective, and result of every session in `knowledge/journal.md`.
 - ALWAYS keep transcription JSON on the pipeline data contract (`knowledge/08_DATA_CONTRACT.md`): `pages` at the top level, page text under `transcription`, object metadata under `metadata`, passed through unchanged from step 3 to step 6.
 - Steps that call an LLM provider check the API key first and abort with a clear message when it is missing. NEVER work around this with an import mode or a silent fallback; externally produced transcriptions enter the pipeline as contract-conformant JSON in `data/processed/transcriptions/`.
-- ALWAYS write provenance metadata into every generated file. JSON files get a `_meta` object. TEI-XML files get a `<revisionDesc>` entry. Include model name, prompt template, and timestamp.
+- ALWAYS write provenance metadata into every generated file. JSON files get a `_meta` object. TEI-XML files get a `<revisionDesc>` entry. LLM outputs record provider, model, prompt instrument, executed-prompt hashes, and timestamp. Deterministic outputs record their input-state timestamp and stable hashes of the material configuration.
 - NEVER skip a checkpoint. Each pipeline step has a verification checkpoint that requires explicit approval before proceeding.
 - NEVER abort on single-object failures. Write the error to `errors.json` in the output directory and continue with the next object.
-- Use the four reference repositories when implementation details are needed. Each has a `knowledge/` folder with synthesized project knowledge that provides context for the code.
+- Use the three research cases when deriving the shared architecture: Hersch (`zbz-ocr-tei`), SZD (`szd-htr-ocr-pipeline`), and DoCTA. Use `co-ocr-htr` and `teiCrafter` as supporting technical sources where their narrower capabilities apply.
 
 ## Project setup
 
@@ -56,7 +56,7 @@ Seven steps with verification checkpoints. NEVER skip a checkpoint.
 
 ### Step 1 Source preparation
 
-Organise source material into one image directory per document. The script only converts PDFs; image files (JPEG, PNG, TIFF) go directly into `data/sources/images/{doc_id}/` and are picked up by steps 2, 3, and 6 through the shared image-root resolver (`config.resolve_image_dir`: `data/sources/images/` first, then `data/processed/images/`). Record object-level metadata (title, date, rights) in `knowledge/02_DATA.md`.
+Organise source material into one image directory per document. The script only converts PDFs; image files (JPEG, PNG, TIFF) go directly into `data/sources/images/{doc_id}/` and are picked up by steps 2, 3, and 6 through the shared image-root resolver (`config.resolve_image_dir`: `data/sources/images/` first, then `data/processed/images/`). Record the metadata source in `knowledge/02_DATA.md` and the machine-readable object metadata in `data/sources/manifest.json`.
 
 - **Script** `pipeline/01_extract_images.py` (only when PDFs exist in `data/sources/pdf/`)
 - **Reads** `data/sources/pdf/`
@@ -66,7 +66,7 @@ Organise source material into one image directory per document. The script only 
 ### Step 2 Analysis and inventory
 
 - **Script** `pipeline/02_analyze.py`
-- **Reads** `data/sources/`, `data/processed/images/`
+- **Reads** `data/sources/` including `manifest.json`, `data/processed/images/`
 - **Writes** `data/inventory.json`, updates `knowledge/02_DATA.md`
 - **Context** `knowledge/01_PROJECT.md`
 
@@ -80,6 +80,8 @@ Organise source material into one image directory per document. The script only 
 - **Context** `knowledge/02_DATA.md`, `knowledge/03_CONTEXT.md`
 - **Prompt** `pipeline/prompts/transcription.md`
 
+Step 3 assembles the base prompt, the manifest-selected profile under `pipeline/prompts/profiles/`, the document metadata, and an optional object override under `pipeline/prompts/objects/`. A declared profile must exist. The output records all layers and their combined hash. It also preserves the original model text as `transcription_raw` and starts the human review state at `machine_unreviewed`.
+
 Start with a sample (5-10 objects), not the full corpus.
 
 **CHECKPOINT** Present 3-5 transcriptions alongside the original images. Verify quality. If the model or prompt needs adjustment, iterate on the sample. Process the full corpus only after approval.
@@ -92,20 +94,22 @@ Start with a sample (5-10 objects), not the full corpus.
 - **Context** `knowledge/03_CONTEXT.md`
 - **Prompt** `pipeline/prompts/validation.md`
 
-**CHECKPOINT** Present a summary showing how many objects are "confident", "needs review", "problematic". List triggered quality signals and problematic objects. Proceed only after approval.
+**CHECKPOINT** Present a summary showing how many objects are "confident", "needs review", "problematic". These values are automatic triage signals. Report the separate human review states and never advance them from an automatic result. List triggered quality signals and problematic objects. Proceed only after approval.
 
 ### Step 5 TEI annotation
 
 - **Script** `pipeline/05_annotate_tei.py`
 - **Reads** `data/processed/validated/`
 - **Writes** `data/processed/tei/{object_id}.xml`, `results/tei/{object_id}.xml`
-- **Context** `knowledge/03_CONTEXT.md`, `knowledge/04_TEI_MAPPING.md`
-- **Prompt** `pipeline/prompts/annotation.md`
-- **Schemas** `schemas/dtabf.json` (encoding profile for generation), `schemas/basisformat.rng` (RelaxNG validation); roles and commands in `schemas/README.md`
+- **Runtime context** `knowledge/01_PROJECT.md`
+- **Extension contract** `knowledge/03_CONTEXT.md`, `knowledge/04_TEI_MAPPING.md`
+- **Schemas** the project-selected `VALIDATION_SCHEMA` in `pipeline/config.py`; roles and commands in `schemas/README.md`
 
 Start with a sample, then full corpus.
 
-**CHECKPOINT** Present 2-3 generated TEI files. Verify annotation correctness, mapping accuracy, and RelaxNG validation against `schemas/basisformat.rng` (command in `schemas/README.md`). If adjustment is needed, update `knowledge/04_TEI_MAPPING.md` and the prompt, then repeat the sample.
+Step 5 is deterministic for the same validated input and the same parsed project configuration. The base renderer covers project metadata, pages, paragraphs, line breaks, transcription markers, facsimile references, declared page-state notes, and the document review status. Ordered page-text preservation is a blocking gate. Semantic entities and corpus-specific structures require an explicit deterministic extension or a separate documented stage. Implement that extension against `knowledge/04_TEI_MAPPING.md` and record the decision.
+
+**CHECKPOINT** Present 2-3 generated TEI files. Verify text preservation, mapping accuracy, provenance, and RelaxNG validation against the configured schema. If adjustment is needed, update `knowledge/04_TEI_MAPPING.md`, adapt the deterministic renderer, and repeat the sample.
 
 ### Step 5b Requirements engineering and design
 
@@ -133,21 +137,21 @@ Process:
 - **Writes** `docs/data/`, `docs/tei/`, `docs/images/`
 - **Context** `knowledge/01_PROJECT.md`, `knowledge/05_DESIGN.md`
 
-Build the frontend based on the components and wireframes defined in `05_DESIGN.md`. Standard components (catalog, search, document view, TEI download, plaintext export) are always included. Research-specific components (concordance, timeline, specialised registers) are only implemented when defined in the user stories.
+Build the frontend based on the components and wireframes defined in `05_DESIGN.md`. The base template includes a catalog filter, human-review status labels, a read-only document view, TEI download, plaintext export, and an optional page facsimile. Research-specific components, correction controls, and corpus-wide search require explicit implementation and verification.
 
-**CHECKPOINT** Present the frontend (locally or on GitHub Pages). Verify against the acceptance criteria from `05_DESIGN.md`. Check catalog, facsimile-text view, search, and all user-story-specific features.
+**CHECKPOINT** Present the frontend locally. Verify the catalog, document view, available facsimiles, exports, review labels, and every component explicitly required in `05_DESIGN.md`.
 
 ## Edge cases
 
-**Text only, no images.** Steps 1 and 3 are skipped. The pipeline starts at step 2 (analysis), followed by step 4 (validation of existing transcriptions) and step 5 (TEI annotation). The frontend shows annotated text without a facsimile viewer.
+**Text only, no images.** Contract-conformant transcription JSON enters under `data/processed/transcriptions/`; steps 1 and 3 are skipped and processing continues at step 4. Plaintext, PAGE XML, and other formats first need a project-specific conversion into the JSON data contract.
 
-**Images and existing transcriptions.** Existing transcriptions go into `data/sources/text/`. Step 3 is optional. The decision whether to use existing transcriptions or re-transcribe is made at the step 2 checkpoint.
+**Images and existing transcriptions.** Source files may lie under `data/sources/text/` for inventory. Step 3 is skipped only when a contract-conformant JSON copy exists under `data/processed/transcriptions/`; every other format needs an explicit conversion.
 
 **Existing TEI files.** Steps 1-5 are skipped. TEI files go into `data/sources/text/` and are processed directly by step 6 (frontend). Alternatively, specific transformation tasks can be defined and executed as modifications to the existing TEI files.
 
 **Existing structured transcriptions (JSON).** Files following the data contract (`knowledge/08_DATA_CONTRACT.md`) are placed in `data/processed/transcriptions/{object_id}.json`; the pipeline continues at step 4. For the inventory they may additionally lie in `data/sources/text/`, where step 2 counts their pages from the `pages` array.
 
-**Remote facsimiles.** Images are delivered as URLs, not files. Declare them in `metadata.image_urls` of the transcription JSON; step 5 writes them as `<facsimile>` with `graphic url`, the frontend renders the URL directly. To materialize local copies (required for vision-based transcription and verification; fetch the image to disk first, a URL fetch alone does not reach the vision input), run `pipeline/fetch_facsimiles.py`, which writes to `data/processed/images/{object_id}/`. Check the image licence before materializing.
+**Remote facsimiles.** Declare page records in `data/sources/manifest.json`, run step 2, then run `uv run python pipeline/fetch_facsimiles.py --all --from-manifest`. The utility writes URL- and hash-bound local copies to `data/processed/images/{object_id}/`. Step 5 retains the source URLs in TEI. For canonical step-3 TEI, step 6 publishes the verified local snapshot under `docs/images/{object_id}/`; external TEI without a source hash may render URLs directly. Check licence and access conditions before materializing.
 
 ## Script modification protocol
 
@@ -163,11 +167,12 @@ When a pipeline script needs modification because it does not cover a source typ
 
 ## Reference repositories
 
-Each repository has a `knowledge/` folder with synthesized and distilled project knowledge that provides implementation context.
+The three edition cases carry the empirical comparison. Two supporting repositories provide narrower implementation patterns.
 
 | Repo | Strength | Knowledge |
 |---|---|---|
-| [zbz-ocr-tei](https://github.com/chpollin/zbz-ocr-tei) | End-to-end PDF to TEI, epistemic infrastructure | 21 knowledge documents |
+| `zbz-ocr-tei` (private research repository) | Hersch end-to-end source processing, review streams, project schema | Foundational research case |
 | [szd-htr-ocr-pipeline](https://github.com/chpollin/szd-htr-ocr-pipeline) | Scaling, prompt grouping, quality signals, viewer | Verification concept, evaluation results |
+| [DoCTA](https://github.com/DigitalHumanitiesCraft/DoCTA) | IIIF and Transkribus input, review return path, entities, arithmetic checks, strict project schema | Architectural transfer case |
 | [co-ocr-htr](https://github.com/DigitalHumanitiesCraft/co-ocr-htr) | Provider abstraction, validation logic, PAGE-XML | Architecture, overview, reference docs |
 | [teiCrafter](https://github.com/DigitalHumanitiesCraft/teiCrafter) | TEI prompt architecture, schema guidance, post-generation validation | 4 knowledge documents |

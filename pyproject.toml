@@ -1,12 +1,11 @@
 # Project metadata and tool configuration. The pipeline is a script regime:
 # no [build-system], nothing is installed, the numbered steps run in place.
-# requirements.txt stays the documented install path (SETUP.md).
 
 [project]
 name = "agentic-edition-pipeline"
-version = "0.1.0"
+version = "0.9.0"
 description = "Forkable template for LLM-assisted digital scholarly editions: images to transcription to TEI to static frontend."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Christopher Pollin", email = "office@dhcraft.org" }]
 dependencies = [
@@ -20,13 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.15"]
+dev = ["pre-commit>=4.0", "pytest>=8.0", "ruff>=0.16.0"]
 
 [project.urls]
 Repository = "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 # The step scripts import their shared modules by bare name from within
 # pipeline/, and the tests import conftest the same way; naming both roots
 # lets the import sorter tell first-party modules from dependencies.

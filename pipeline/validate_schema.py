@@ -8,10 +8,11 @@ generator's header does not pass it (journal, 2026-07-18), so a strict-DTABf
 fork adapts the header template first (see schemas/README.md).
 
 Usage:
-    python pipeline/validate_schema.py                    # all results/tei/*.xml
-    python pipeline/validate_schema.py FILE [FILE ...]
-    python pipeline/validate_schema.py --schema schemas/tei_all.rng
+    uv run python pipeline/validate_schema.py                    # all results/tei/*.xml
+    uv run python pipeline/validate_schema.py FILE [FILE ...]
+    uv run python pipeline/validate_schema.py --schema schemas/tei_all.rng
 """
+
 import argparse
 import sys
 from dataclasses import dataclass, field
@@ -48,7 +49,7 @@ def validate_files(schema_path: Path, files: list) -> list:
         f = Path(f)
         try:
             doc = etree.parse(str(f))
-        except etree.XMLSyntaxError as e:
+        except (etree.XMLSyntaxError, OSError) as e:
             results.append(FileResult(f, False, [f"not well-formed: {e}"]))
             continue
         if rng.validate(doc):
@@ -63,13 +64,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate TEI files against the project's RelaxNG schema."
     )
-    parser.add_argument("files", nargs="*", help="TEI files (default: results/tei/*.xml)")
-    parser.add_argument("--schema", type=Path, default=None,
-                        help="RelaxNG schema (default: config.VALIDATION_SCHEMA)")
+    parser.add_argument(
+        "files", nargs="*", help="TEI files (default: results/tei/*.xml)"
+    )
+    parser.add_argument(
+        "--schema",
+        type=Path,
+        default=None,
+        help="RelaxNG schema (default: config.VALIDATION_SCHEMA)",
+    )
     args = parser.parse_args()
 
     schema = args.schema or default_schema()
-    files = [Path(f) for f in args.files] or sorted(config.RESULTS_TEI_DIR.glob("*.xml"))
+    files = [Path(f) for f in args.files] or sorted(
+        config.RESULTS_TEI_DIR.glob("*.xml")
+    )
     if not files:
         print(f"No TEI files found in {config.RESULTS_TEI_DIR}. Run step 5 first.")
         return 1

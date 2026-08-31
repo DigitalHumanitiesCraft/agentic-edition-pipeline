@@ -6,6 +6,7 @@ diplomatic edition type, page-type handling, frontend text normalization
 and remote image rendering, JSON page counting in step 2, and the API key
 gate helper.
 """
+
 import json
 
 from lxml import etree
@@ -27,6 +28,7 @@ contract = load_step("contract")
 # Step 4: contract pass-through and status mapping
 # ---------------------------------------------------------------------------
 
+
 def _run_validate(monkeypatch, tmp_path, fixture):
     src_dir = tmp_path / "transcriptions"
     dst_dir = tmp_path / "validated"
@@ -42,10 +44,13 @@ def _run_validate(monkeypatch, tmp_path, fixture):
     return json.loads((dst_dir / "fixture1.json").read_text(encoding="utf-8"))
 
 
-def test_validate_passes_pages_and_metadata_through(monkeypatch, tmp_path, fixture_transcription):
+def test_validate_passes_pages_and_metadata_through(
+    monkeypatch, tmp_path, fixture_transcription
+):
     out = _run_validate(monkeypatch, tmp_path, fixture_transcription)
     assert out["pages"] == fixture_transcription["pages"]
     assert out["metadata"] == fixture_transcription["metadata"]
+    assert out["transcription_meta"] == fixture_transcription["_meta"]
 
 
 def test_step4_output_still_satisfies_the_runtime_contract(
@@ -64,18 +69,32 @@ def test_needs_review_signal_maps_to_needs_review_not_problematic(
 
 def test_status_mapping_decision_tree():
     clean_rules = [{"name": "r", "count": 0, "severity": "info"}]
-    assert step4.compute_overall_status(clean_rules, {"needs_review": False}, None) == "confident"
-    assert step4.compute_overall_status(clean_rules, {"needs_review": True}, None) == "needs_review"
-    assert step4.compute_overall_status(clean_rules, None, None, gate_pages=1) == "needs_review"
+    assert (
+        step4.compute_overall_status(clean_rules, {"needs_review": False}, None)
+        == "confident"
+    )
+    assert (
+        step4.compute_overall_status(clean_rules, {"needs_review": True}, None)
+        == "needs_review"
+    )
+    assert (
+        step4.compute_overall_status(clean_rules, None, None, gate_pages=1)
+        == "needs_review"
+    )
     llm_uncertain = [{"page": 1, "confidence": "uncertain"}]
-    assert step4.compute_overall_status(clean_rules, None, llm_uncertain) == "problematic"
-    three_errors = [{"name": f"r{i}", "count": 9, "severity": "error"} for i in range(3)]
+    assert (
+        step4.compute_overall_status(clean_rules, None, llm_uncertain) == "problematic"
+    )
+    three_errors = [
+        {"name": f"r{i}", "count": 9, "severity": "error"} for i in range(3)
+    ]
     assert step4.compute_overall_status(three_errors, None, None) == "problematic"
 
 
 # ---------------------------------------------------------------------------
 # Step 5: TEI header, facsimile, body structure
 # ---------------------------------------------------------------------------
+
 
 def _generate_root(fixture, project=None):
     xml = step5.generate_tei("fixture1", fixture, project or {})
@@ -120,9 +139,22 @@ def test_foreign_text_stays_out_of_edited_body(fixture_transcription):
     p_texts = ["".join(p.itertext()) for p in root.findall(".//tei:body//tei:p", NS)]
     assert not any("Anderer Beitrag" in t for t in p_texts)
     assert not any("Fremder Absatz" in t for t in p_texts)
-    foreign = ["".join(n.itertext()) for n in root.findall(".//tei:body//tei:note[@type='foreign']", NS)]
+    foreign = [
+        "".join(n.itertext())
+        for n in root.findall(".//tei:body//tei:note[@type='foreign']", NS)
+    ]
     assert any("Anderer Beitrag" in t for t in foreign)
     assert any("Fremder Absatz" in t for t in foreign)
+
+
+def test_whole_foreign_page_preserves_paragraph_boundaries(fixture_transcription):
+    fixture_transcription["pages"][2]["transcription"] = "First\n\nSecond"
+
+    root, xml = _generate_root(fixture_transcription)
+
+    foreign = root.findall(".//tei:body//tei:note[@type='foreign']", NS)
+    assert ["".join(note.itertext()) for note in foreign[-2:]] == ["First", "Second"]
+    assert step5.validate_tei(xml, fixture_transcription["pages"])["plaintext_exact"]
 
 
 def test_gate_and_empty_page_notes(fixture_transcription):
@@ -140,9 +172,39 @@ def test_generated_tei_is_well_formed_and_valid_report(fixture_transcription):
     assert report["required_elements"]
 
 
+def test_diplomatic_roundtrip_rejects_a_lost_line_break(fixture_transcription):
+    _, xml = _generate_root(fixture_transcription)
+    broken = xml.replace("Erste Zeile<lb/>Zweite Zeile", "Erste Zeile Zweite Zeile")
+
+    report = step5.validate_tei(broken, fixture_transcription["pages"])
+
+    assert report["plaintext_exact"] is False
+
+
+def test_tei_carries_the_least_mature_human_review_status(fixture_transcription):
+    for page in fixture_transcription["pages"]:
+        page["review"] = {"status": "accepted", "history": []}
+    fixture_transcription["pages"][2]["review"]["status"] = "in_review"
+
+    root, _ = _generate_root(fixture_transcription)
+
+    revision = root.find(".//tei:revisionDesc", NS)
+    change = root.find(".//tei:revisionDesc/tei:change", NS)
+    assert revision is not None and revision.get("status") == "in_review"
+    assert change is not None and change.get("status") == "in_review"
+
+
+def test_tei_generation_is_byte_identical_for_the_same_input(fixture_transcription):
+    first = step5.generate_tei("fixture1", fixture_transcription, {})
+    second = step5.generate_tei("fixture1", fixture_transcription, {})
+
+    assert first == second
+
+
 # ---------------------------------------------------------------------------
 # Step 6: frontend extraction
 # ---------------------------------------------------------------------------
+
 
 def test_frontend_normalizes_whitespace_and_renders_remote_urls(
     monkeypatch, tmp_path, fixture_transcription
@@ -154,11 +216,12 @@ def test_frontend_normalizes_whitespace_and_renders_remote_urls(
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
     monkeypatch.setattr(step6, "DOCS_DIR", docs_dir)
-    monkeypatch.setattr(step6, "resolve_image_dir", lambda _id: None)
+    monkeypatch.setattr(step6, "ordered_page_images", lambda _id: [])
 
     data = step6.process_tei(tei_path)
     assert data["title"] == "Brief vom 22. Mai 1901"
     assert data["language"] == "fr"
+    assert data["signature"] == "A 1"
 
     page1 = data["pages"][0]
     # lb becomes a line break, indentation whitespace is gone
@@ -187,7 +250,9 @@ def test_frontend_copies_local_images_into_docs(monkeypatch, tmp_path):
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
     monkeypatch.setattr(step6, "DOCS_DIR", docs_dir)
-    monkeypatch.setattr(step6, "resolve_image_dir", lambda _id: image_dir)
+    monkeypatch.setattr(
+        step6, "ordered_page_images", lambda _id: [image_dir / "loc1_p001.png"]
+    )
 
     data = step6.process_tei(tei_path)
     assert data["has_images"] is True
@@ -199,7 +264,10 @@ def test_frontend_copies_local_images_into_docs(monkeypatch, tmp_path):
 # Step 2: JSON source type with page counting
 # ---------------------------------------------------------------------------
 
-def test_analyze_counts_json_pages_from_pages_array(monkeypatch, tmp_path, fixture_transcription):
+
+def test_analyze_counts_json_pages_from_pages_array(
+    monkeypatch, tmp_path, fixture_transcription
+):
     sources = tmp_path / "sources"
     (sources / "text").mkdir(parents=True)
     (sources / "text" / "fixture1.json").write_text(
@@ -216,6 +284,7 @@ def test_analyze_counts_json_pages_from_pages_array(monkeypatch, tmp_path, fixtu
 # ---------------------------------------------------------------------------
 # API key gate
 # ---------------------------------------------------------------------------
+
 
 def test_missing_api_key_helper(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", "")

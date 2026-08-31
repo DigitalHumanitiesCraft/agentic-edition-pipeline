@@ -97,6 +97,10 @@ main {
 .badge-confident { background: var(--color-confident-bg); color: var(--color-confident); }
 .badge-needs_review { background: var(--color-review-bg); color: var(--color-review); }
 .badge-problematic { background: var(--color-problematic-bg); color: var(--color-problematic); }
+.badge-machine_unreviewed { background: var(--color-review-bg); color: var(--color-review); }
+.badge-in_review { background: #fff8e1; color: #805500; }
+.badge-human_verified { background: #e3f2fd; color: #155a91; }
+.badge-accepted { background: var(--color-confident-bg); color: var(--color-confident); }
 
 /* Viewer layout */
 .viewer-header {
@@ -152,17 +156,6 @@ main {
   cursor: pointer; text-decoration: none;
 }
 .btn:hover { background: var(--color-bg); border-color: var(--color-accent); }
-
-/* Indices view */
-.indices-group h3 {
-  font-size: 1.1rem; border-bottom: 2px solid var(--color-accent);
-  padding-bottom: var(--space-xs); margin-top: var(--space-lg);
-}
-.indices-list { list-style: none; padding: 0; margin: 0 0 var(--space-md) 0; }
-.indices-list li { padding: var(--space-xs) 0; }
-.indices-list a { color: var(--color-accent); text-decoration: none; }
-.indices-list a:hover { text-decoration: underline; }
-.indices-ref { color: var(--color-text-muted); }
 
 /* Footer */
 footer {

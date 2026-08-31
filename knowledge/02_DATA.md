@@ -17,6 +17,8 @@ tags: [data, corpus, inventory]
 
 [TODO: Wo liegen die Daten? Pfad zu `data/sources/`]
 
+Externe Katalogdaten, Remote-Faksimiles und die Auswahl des Transkriptionsprofils werden vor dem ersten Modelllauf in `data/sources/manifest.json` deklariert. Schritt 2 fuehrt diese Angaben mit lokal gefundenen Dateien zusammen. Lokale Korpora ohne zusaetzliche Angaben lassen die Dokumentliste im Manifest leer.
+
 ## Korpusumfang
 
 | Feld | Wert |
@@ -33,6 +35,8 @@ tags: [data, corpus, inventory]
 ## Dokumenttypen
 
 [TODO: Welche Dokumenttypen kommen vor? Handschrift, Typoskript, Druck, Formular, Tabelle, Zeitungsausschnitt, Korrespondenz, etc. Diese Information beeinflusst die Prompt-Gruppierung in Schritt 3.]
+
+Jeder wiederholt auftretende Materialtyp erhaelt ein eigenes, evaluiertes Promptprofil unter `pipeline/prompts/profiles/`. Das Quellenmanifest weist Dokumente mit `prompt_profile` einem solchen Profil zu. Einzelne Ausnahmen werden als Objektregel unter `pipeline/prompts/objects/{object_id}.md` dokumentiert.
 
 ## Qualitaet der Digitalisate
 

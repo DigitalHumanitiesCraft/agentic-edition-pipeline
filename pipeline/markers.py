@@ -12,6 +12,7 @@ right choice before a scan for artifacts. resolve_markers produces the
 reading text instead: the insertion stays, the struck-through text goes, the
 two bracket markers vanish.
 """
+
 from __future__ import annotations
 
 import re

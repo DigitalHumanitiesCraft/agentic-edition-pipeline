@@ -4,6 +4,7 @@ The markers are declared in pipeline/prompts/transcription.md; these checks
 hold the module to that declaration and pin the consequence in step 4, where
 a marker must not read as OCR noise.
 """
+
 from conftest import load_step
 
 markers = load_step("markers")
@@ -21,7 +22,9 @@ def test_strip_removes_every_convention_marker():
 
 def test_resolve_keeps_insertions_and_drops_struck_text():
     assert _words(markers.resolve_markers("~~alt~~ {neu}")) == "neu"
-    assert _words(markers.resolve_markers("Wort[?] und [...] weiter")) == "Wort und weiter"
+    assert (
+        _words(markers.resolve_markers("Wort[?] und [...] weiter")) == "Wort und weiter"
+    )
 
 
 def test_ocr_artifact_rule_ignores_convention_markers():

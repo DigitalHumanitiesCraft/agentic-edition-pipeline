@@ -8,6 +8,7 @@ schema validation, and 6 through their public command-line interfaces.
 Usage:
     python examples/offline-quickstart/run.py
     python examples/offline-quickstart/run.py --target PATH --force
+    python examples/offline-quickstart/run.py --clean
 
 No provider is configured and no network call is made. The target is separate
 from the repository's working data, so the template skeleton stays unchanged.
@@ -25,7 +26,7 @@ import stat
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -44,8 +45,6 @@ OFFLINE_ENVIRONMENT = {
     "TRANSCRIPTION_MODEL": "",
     "VALIDATION_PROVIDER": "",
     "VALIDATION_MODEL": "",
-    "ANNOTATION_PROVIDER": "",
-    "ANNOTATION_MODEL": "",
 }
 
 
@@ -116,7 +115,7 @@ def _ownership_payload(target: Path) -> dict:
     return {
         "_meta": {
             "script": "examples/offline-quickstart/run.py",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         },
         "owner": OWNERSHIP_NAME,
         "sentinel_version": OWNERSHIP_VERSION,
@@ -209,7 +208,7 @@ def _copy_runtime(target: Path) -> None:
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     for name in ("pipeline", "schemas", "knowledge"):
         shutil.copytree(REPOSITORY_ROOT / name, target / name, ignore=ignore)
-    for name in ("pyproject.toml", "requirements.txt", "LICENSE"):
+    for name in ("pyproject.toml", "uv.lock", "LICENSE"):
         shutil.copy2(REPOSITORY_ROOT / name, target / name)
 
     docs_target = target / "docs"
@@ -285,7 +284,7 @@ def _verify_outputs(target: Path) -> dict:
     report = {
         "_meta": {
             "script": "examples/offline-quickstart/run.py",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "pipeline_step": "offline_quickstart",
         },
         "objects": expected_ids,
@@ -315,6 +314,17 @@ def build(target: Path, force: bool = False) -> dict:
         raise
 
 
+def clean(target: Path) -> bool:
+    """Remove an existing runner-owned target and report whether it existed."""
+    target = _validated_target(target)
+    if not target.exists():
+        return False
+    if not target.is_dir():
+        raise NotADirectoryError(f"target is not a directory: {target}")
+    _remove_owned_target(target)
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build the synthetic Agentic Edition Pipeline example offline."
@@ -325,14 +335,26 @@ def main() -> int:
         default=DEFAULT_TARGET,
         help=f"isolated output directory (default: {DEFAULT_TARGET})",
     )
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
         "--force",
         action="store_true",
         help="replace a non-empty target only when its ownership marker is valid",
     )
+    action.add_argument(
+        "--clean",
+        action="store_true",
+        help="remove the target only when its ownership marker is valid",
+    )
     args = parser.parse_args()
 
     try:
+        if args.clean:
+            removed = clean(args.target)
+            target = args.target.resolve()
+            outcome = "removed" if removed else "already absent"
+            print(f"OK   offline quickstart target {outcome}: {target}")
+            return 0
         report = build(args.target, force=args.force)
     except (FileExistsError, NotADirectoryError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

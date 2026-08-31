@@ -48,19 +48,17 @@ Jede User Story beschreibt ein konkretes Nutzungsszenario und wird einem Epic zu
 
 Jede User Story wird auf konkrete UI-Elemente abgebildet. Das Mapping bestimmt, welche Komponenten das Frontend enthaelt.
 
-### Standardkomponenten (immer vorhanden)
+### Komponenten des Basisfrontends
 
-Diese Komponenten sind Bestandteil jeder Edition, unabhaengig von der Forschungsfrage:
+Diese Komponenten sind im aktuellen Basisfrontend technisch vorhanden. Der Fork prueft ihre Inhalte und entscheidet, welche weiteren Funktionen sein Editionsziel verlangt.
 
 | Komponente | Beschreibung | RIDE-Kriterium |
 |---|---|---|
 | Katalog | Filterbare Dokumentenliste mit Metadaten | 4.3 Browsen |
-| Volltextsuche | Client-seitige Suche ueber alle Dokumente | 4.4 Suche |
-| Dokumentenansicht | Seitenweise Textdarstellung | 4.6 Darstellungsqualitaet |
+| Review-Status | Sichtbarer zusammengefasster Seitenstatus im Katalog und Dokument | 1.5 Transparenz |
+| Dokumentenansicht | Seitenweise Textdarstellung mit optionalem Faksimile | 4.6 Darstellungsqualitaet |
 | TEI-Download | XML-Datei pro Dokument herunterladen | 4.9 Schnittstellen, 4.12 Basisdaten |
 | Plaintext-Export | Reiner Text ohne Markup | 4.11 Export-Formate |
-| Zitierhinweis | Zitierrichtlinie im Footer | 4.8 Identifikation |
-| Impressum | Projektinformation, Lizenz, Kontakt | 1.5 Transparenz |
 
 ### Forschungsspezifische Komponenten
 
@@ -69,6 +67,9 @@ Diese Komponenten sind Bestandteil jeder Edition, unabhaengig von der Forschungs
 | Komponente | User Story | Beschreibung | Implementierungshinweis |
 |---|---|---|---|
 | [TODO] | US-01 | [TODO] | [TODO] |
+| Korpusweite Volltextsuche | [TODO] | Suchindex und Trefferanzeige, falls wissenschaftlich erforderlich | Eigene Datenprojektion und UI |
+| Zitierhinweis | [TODO] | Persistente Objektadresse und Zitationsschema | Projektmetadaten und UI |
+| Impressum und Kontakt | [TODO] | Verantwortlichkeit, Lizenz und Kontaktweg | Projektinhalt und UI |
 
 ### Komponentenmatrix nach Editionstyp
 

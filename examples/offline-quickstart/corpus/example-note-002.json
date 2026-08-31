@@ -2,7 +2,7 @@
   "_meta": {
     "script": "offline_quickstart_fixture",
     "timestamp": "2026-08-26T00:00:00+00:00",
-    "pipeline_step": 3
+    "pipeline_step": 0
   },
   "object_id": "example-note-002",
   "source_images": [],
@@ -19,7 +19,8 @@
       "transcription": "Inventory note\n\nBox 3 contains two letters and one envelope. The enclosure belongs with the first letter.",
       "notes": "",
       "page_type": "",
-      "foreign_paragraphs": []
+      "foreign_paragraphs": [],
+      "review": {"status": "machine_unreviewed", "history": []}
     }
   ],
   "confidence": "high",
@@ -29,6 +30,7 @@
     "total_chars": 105,
     "chars_per_page": 105.0,
     "blank_pages": 0,
+    "undeclared_empty_pages": 0,
     "gate_pages": 0,
     "foreign_pages": 0,
     "content_pages": 1,

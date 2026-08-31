@@ -8,9 +8,9 @@ tags: [tei, mapping, schema, dtabf]
 
 ## TEI-Profil
 
-DTA-Basisformat (DTABf). Schema in `schemas/dtabf.json`. Anpassbar bei Bedarf.
+Der Fork legt sein Validierungsziel in `pipeline/config.py` fest. `schemas/tei_all.rng` ist das lauffähige Ausgangsprofil des Templates. `schemas/basisformat.rng` ist das mitgelieferte strengere DTA-Basisformat-Schema; seine Nutzung erfordert einen angepassten Header.
 
-[TODO: Abweichendes Profil? Eigenes ODD?]
+[TODO: Projektprofil, ODD oder RelaxNG-Schema festlegen und die Auswahl in [[decisions]] begründen.]
 
 ## Header-Mapping
 
@@ -18,34 +18,43 @@ Zuordnung von Projektmetadaten zu TEI-Header-Elementen. Quellen sind die Knowled
 
 | Metadatenfeld | TEI-Element | Quelle |
 |---|---|---|
-| Titel | `titleStmt/title` | [[01_PROJECT]] |
+| Dokumenttitel | `titleStmt/title` | Dokumentmetadaten `title`, Fallback `object_id` |
 | Herausgeber | `titleStmt/editor` | [[01_PROJECT]] |
 | Verlag/Institution | `publicationStmt/publisher` | [[01_PROJECT]] |
 | Lizenz | `publicationStmt/availability/licence` | [[01_PROJECT]] |
-| Signatur | `msIdentifier/idno` | Dokumentmetadaten |
+| Signatur | `msIdentifier/idno[@type='shelfmark']` | Dokumentmetadaten `signature` |
+| Objekt-ID | `msIdentifier/idno[@type='object-id']` | `object_id` |
 | Repository | `msIdentifier/repository` | Dokumentmetadaten |
-| Sprache | `profileDesc/langUsage/language` | [[02_DATA]] |
+| Sprache | `profileDesc/langUsage/language` | Dokumentmetadaten `language`, Fallback `de` |
 | Datum | `history/origin/origDate` | Dokumentmetadaten |
 
 ## Body-Mapping
 
-Zuordnung von Quellelementen zu TEI-Body-Elementen.
+Der deterministische Basispfad bildet die folgenden Strukturen ab.
 
 | Quellelement | TEI-Element | Regeln |
 |---|---|---|
 | Absatz | `<p>` | Doppelzeilenumbruch trennt Absaetze |
-| Ueberschrift | `<head>` | Erkennung via Layout-Analyse oder Prompt |
 | Seitenumbruch | `<pb/>` | Pro Faksimile-Bild, mit `@n` und `@facs` |
 | Zeilenumbruch | `<lb/>` | Nur bei diplomatischer Transkription |
-| Tabelle | `<table><row><cell>` | Struktur aus Prompt-Output |
-| Marginalie | `<note type="marginalia">` | Position aus Layout-Analyse |
-| Kopfzeile | `<fw type="header">` | Wiederkehrend am Seitenanfang |
-| Fusszeile | `<fw type="footer">` | Wiederkehrend am Seitenende |
-| Fussnote | `<note place="foot">` | [TODO: Konventionen fuer Fussnoten] |
+| Fremdtextseite | `<note type="foreign">` | Nur bei entsprechendem `page_type` |
+| Gesperrte Seite | `<note type="gate" subtype="low_resolution">` | Nur bei entsprechendem `page_type` |
+| Leere Seite | `<note type="empty">` | Leerer Text ohne deklarierten Seitentyp |
+| Geloeschter Text `~~text~~` | `<del>text</del>` | Marker wird beim Rundlauf exakt rekonstruiert |
+| Einfuegung `{text}` | `<add>text</add>` | Marker wird beim Rundlauf exakt rekonstruiert |
+| Unsichere Lesung `word[?]` | `<unclear>word</unclear>` | Marker wird beim Rundlauf exakt rekonstruiert |
+| Unleserliche Stelle `[...]` | `<gap reason="illegible"/>` | Optionaler Umfang aus `[... ~N chars]` |
+| Fremdabsatz | `<note type="foreign">` | 0-basierter Index in `foreign_paragraphs` |
+
+Weitere Strukturen werden hier spezifiziert und anschließend im deterministischen Renderer oder in einer getrennten Stufe implementiert. Ein Eintrag in dieser Tabelle allein verändert keine Ausgabe.
+
+| Projektstruktur | TEI-Element | Beleg und Regel |
+|---|---|---|
+| [TODO] | [TODO] | [TODO] |
 
 ## Annotationsregeln
 
-[TODO: Projektspezifische Mapping-Regeln fuer Layer 3 des Annotationsprompts (`pipeline/prompts/annotation.md`). Diese Regeln steuern, wie Claude Code TEI-Annotationen erzeugt.]
+[TODO: Projektspezifische semantische Annotationen und ihre belegten Regeln definieren. Schritt 5 konsumiert diesen Abschnitt nicht automatisch. Der Fork implementiert die Regeln deterministisch oder als eigene dokumentierte und geprüfte Erweiterungsstufe.]
 
 Beispielformat:
 
@@ -58,7 +67,7 @@ Beispielformat:
 
 ## Register
 
-[TODO: Welche Register soll die Edition enthalten? Register werden aus TEI-Annotationen aggregiert und im Frontend angezeigt.]
+[TODO: Welche Register soll die Edition enthalten? Das Basisfrontend aggregiert derzeit keine semantischen Register. Der Fork implementiert die Datenprojektion und Oberfläche gegen die bestätigten Annotationen.]
 
 - [ ] Personenregister (aus `persName`)
 - [ ] Ortsregister (aus `placeName`)

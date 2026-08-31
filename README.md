@@ -1,33 +1,36 @@
 # Agentic Edition Pipeline
 
-Forkable template for AI-assisted digital scholarly editions. From digitised source to TEI-XML and a published curation frontend on GitHub Pages, where the edition is inspected, verified, and presented.
+Forkable template for AI-assisted digital scholarly editions. It connects digitised sources, structured transcription, deterministic TEI generation, formal validation, and a static reading and verification frontend.
+
+**Current state: version 0.9.0, pre-release.** The deterministic path is covered by automated tests and the synthetic offline quickstart. Provider-specific transcription, project-specific scholarly mappings, formal schema selection, and user acceptance remain responsibilities of each edition fork.
 
 Created by [Christopher Pollin](https://github.com/chpollin) ([Digital Humanities Craft](https://github.com/DigitalHumanitiesCraft)). Built with [Claude Code](https://claude.ai/code) using the [Promptotyping](https://doi.org/10.58079/15t4s) methodology.
 
 ## What this is
 
-A project folder with pre-built Python scripts, prompt templates, a knowledge base, and a `CLAUDE.md` that tells Claude Code what to do. Not a GUI tool, not a framework, not a SaaS product.
+A versioned project template with Python scripts, prompt templates, a knowledge base, and a `CLAUDE.md` that routes agentic work. Projects use it as a repository rather than an installed application or hosted service.
 
-The template generalises four production-grade edition projects into a reusable pipeline that goes from PDF/image scans to valid TEI-XML (DTA-Basisformat) and a published static curation frontend, where the facsimile-text comparison supports verification of the machine-generated edition.
+The template generalises the edition workflows developed for the Jeanne Hersch and Stefan Zweig corpora and continued in DoCTA. Together, these three projects form the real research cases of the Agentic Edition Pipeline. The reusable pipeline goes from PDF or image scans to TEI-XML and a static frontend. Schema validation, scholarly review, rights clearance, and acceptance are recorded as separate evidence. [`knowledge/lineage.md`](knowledge/lineage.md) distinguishes these research cases from supporting technical sources and verification artefacts.
 
 ## Forking for your own edition project
 
 This repository is designed to be forked once per edition project. You fill in the knowledge documents for your corpus and editorial guidelines, place your source material in `data/sources/`, and Claude Code operates the pipeline from there. The Python scripts and frontend are shared infrastructure you do not normally need to touch.
 
-The reference projects listed further below are the production repositories this template distils from. They predate the generalised template and were built directly, not forked from it. Use them as orientation for what an instantiated edition project looks like.
+The research cases listed further below have different historical relationships to the reusable repository. The Hersch and SZD pipelines predate the generalised template and supplied its empirical and technical basis. DoCTA applies the resulting architecture to another corpus in an independently developed repository.
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) for the locked Python environment
 - [Claude Code](https://claude.ai/code) (Anthropic's agentic coding tool)
-- An API key for at least one LLM provider (Gemini, OpenAI, Anthropic, or a local Ollama instance). Steps 4 (validation) and 5 (TEI annotation) run without API keys in deterministic mode.
+- An API key for at least one LLM provider when step 3 should transcribe images. Step 4 has a deterministic mode. Step 5 always runs deterministically.
 
 ### Offline quickstart
 
 The repository includes a synthetic two-document corpus that exercises the deterministic path without an API key or network access. It creates an isolated local project under `.aep-quickstart/`, runs steps 4 and 5, validates the generated TEI against the shipped TEI All schema, and builds the static frontend.
 
 ```console
-python examples/offline-quickstart/run.py
+uv run python examples/offline-quickstart/run.py
 ```
 
 The command leaves the template knowledge skeleton and working data unchanged. Recursive replacement through `--force` requires the runner's intact, path-bound ownership marker for every non-empty target, including the canonical `.aep-quickstart/` directory. See [`examples/offline-quickstart/README.md`](examples/offline-quickstart/README.md) for the generated files, preview command, target-safety rules, and verification scope.
@@ -38,7 +41,7 @@ The command leaves the template knowledge skeleton and working data unchanged. R
 2. **Clone** your fork locally.
 3. **Install dependencies.**
    ```
-   pip install -r requirements.txt
+   uv sync --extra dev
    ```
 4. **Set up API keys** by copying `.env.example` to `.env` and filling in at least one provider key.
    ```
@@ -53,9 +56,9 @@ Each pipeline step has a human verification checkpoint. Nothing proceeds without
 
 You do not have to use the full pipeline. Common partial reuse patterns from the reference projects:
 
-- **Existing transcriptions, no OCR needed.** Place plain text files in `data/sources/text/`. Skip steps 1 and 3. The pipeline starts at step 2 (inventory), proceeds to step 4 (validation of existing transcriptions), and continues to TEI annotation. Structured transcription JSON goes directly into `data/processed/transcriptions/` in the pipeline data contract format (`knowledge/08_DATA_CONTRACT.md`); step 2 counts JSON pages from the `pages` array.
-- **Remote facsimiles.** When images are referenced as URLs instead of local files, declare them in `metadata.image_urls` of the transcription JSON. Step 5 writes them as `<facsimile>` with `graphic url`, the frontend renders the URLs directly, and `pipeline/fetch_facsimiles.py` materializes local copies when vision-based transcription or verification needs the files on disk.
-- **Existing TEI, frontend only.** Place TEI files in `data/sources/text/` and copy them to `results/tei/`. Skip steps 1–5. Run only step 6 (frontend build).
+- **Existing structured transcriptions.** Place contract-conformant JSON directly in `data/processed/transcriptions/` and continue at step 4. Plain text, PAGE XML, and other source formats can be inventoried under `data/sources/text/`; a project-specific conversion must first create the JSON defined in `knowledge/08_DATA_CONTRACT.md`.
+- **Remote facsimiles.** Declare remote pages in `data/sources/manifest.json`, run step 2, then materialize them with `uv run python pipeline/fetch_facsimiles.py --all --from-manifest` before transcription. The fetch manifest binds each URL to the downloaded bytes. Canonical step-3 output carries a source-image hash, so step 6 publishes a verified local snapshot under `docs/images/`. External TEI without this hash may continue to render its remote URLs directly.
+- **Existing TEI, frontend only.** Place TEI files in `data/sources/text/` and copy checked candidates to `results/tei/`. Step 6 can build a local frontend without steps 1–5. The supplied Pages workflow additionally requires the selected RelaxNG schema and `revisionDesc/@status="accepted"`; an external TEI project must map its review state to that gate or adapt and document the publication policy.
 - **Different TEI schema.** Replace the schema files in `schemas/` (see `schemas/README.md`) and update `knowledge/04_TEI_MAPPING.md`. Document the decision in `knowledge/decisions.md`.
 - **Different LLM provider.** Change `TRANSCRIPTION_PROVIDER` and `TRANSCRIPTION_MODEL` in `.env`. The provider abstraction in `pipeline/llm.py` supports Gemini, OpenAI, Anthropic, and Ollama without code changes.
 
@@ -64,13 +67,13 @@ You do not have to use the full pipeline. Common partial reuse patterns from the
 At any checkpoint, preview the edition in your browser:
 ```
 cd pipeline
-python 06_build_frontend.py --serve
+uv run python 06_build_frontend.py --serve
 ```
 This starts a local server at `http://localhost:8080` serving the same files that will be published on GitHub Pages.
 
 ### Publishing
 
-Enable GitHub Pages in your repository settings (source: deploy from branch, branch: main, folder: /docs). The workflow at `.github/workflows/pages.yml` handles deployment automatically on every push to main.
+Enable GitHub Pages with **GitHub Actions** as its source. The workflow at `.github/workflows/pages.yml` installs the locked environment, checks schema conformance and page acceptance, rebuilds the publication data from committed `results/tei/`, and deploys `docs/` on every push to `main`. For TEI that records a source-image hash, commit the verified `docs/images/{doc_id}/` snapshot produced by step 6; bulk source and processed images remain ignored.
 
 ## Pipeline overview
 
@@ -82,11 +85,11 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
    ── verify transcription quality ──
 04 Validate          Deterministic rules + optional LLM judge
    ── review quality summary ──
-05 Annotate TEI      Deterministic TEI generation + optional LLM annotation
+05 Annotate TEI      Deterministic TEI generation against a project mapping
    ── preview edition, verify TEI ──
 5b Design            Requirements engineering (epics, user stories, UI components)
    ── verify design ──
-06 Build Frontend    Generate catalog and data for the static curation frontend
+06 Build Frontend    Generate catalog and data for the static verification frontend
    ── verify published edition ──
 ```
 
@@ -100,9 +103,9 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Key parameters.** `IMAGE_DPI` (default 150). Use 300 for small print or fine handwriting.
 
-**Skip when.** Source material is already images or plain text. Image directories under `data/sources/images/` are picked up directly by steps 2 and 3 without any conversion.
+**Skip when.** Source material is already a directory of page images, or when the project enters later with contract-conformant transcription JSON. Image directories under `data/sources/images/` are picked up directly by steps 2 and 3 without conversion.
 
-**Metadata.** Corpus-level metadata (editor, institution, licence) lives in `knowledge/01_PROJECT.md` and flows into the TEI header from there. Per-object metadata (title, language, date, object type, remote image URLs) lives in the `metadata` object of the transcription JSON (`knowledge/08_DATA_CONTRACT.md`) and is passed through unchanged to the TEI header and the frontend catalog. Record where it comes from in `knowledge/02_DATA.md`.
+**Metadata.** Corpus-level metadata (editor, institution, licence) lives in `knowledge/01_PROJECT.md`. Per-object metadata, page URLs, and the selected prompt profile enter through `data/sources/manifest.json`. Step 2 merges the manifest with files discovered locally. The normalised metadata then travels through the transcription contract to the TEI header and frontend catalog.
 
 **Known limits.** The script renders PDF pages fresh at the configured DPI; for image-only scanned PDFs this re-rasterises the embedded scan, which cannot exceed the source resolution.
 
@@ -112,11 +115,13 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Purpose.** Build a structured inventory of all documents across `data/sources/` and `data/processed/images/`. The inventory is the single source of truth downstream steps use to know what to process.
 
-**Input.** `data/sources/` (all subdirectories), `data/processed/images/`
+**Input.** `data/sources/` including the optional `manifest.json`, plus `data/processed/images/`
 
 **Output.** `data/inventory.json`. With `--update-knowledge`, also updates the `<!-- INVENTAR_START -->…<!-- INVENTAR_END -->` block in `knowledge/02_DATA.md`.
 
 **Key parameters.** `--update-knowledge` (inject summary into knowledge document), `--format markdown` (human-readable output on stdout).
+
+**Source manifest.** The committed manifest uses version `0.1`. Each document may declare `id`, `prompt_profile`, `metadata`, and a consecutively numbered `pages` list. Within one document, every page has an `image_url` or every page refers to local material. This provides an entry point for IIIF and other remote corpora before any transcription exists. Local-only projects can leave the document list empty.
 
 **Known limits.** Language detection is not automated; the `languages` field in the inventory summary is left empty for the human to fill in.
 
@@ -128,13 +133,17 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Input.** `data/inventory.json`, images via the shared image-root resolver (`data/sources/images/{doc_id}/` first, then `data/processed/images/{doc_id}/`)
 
-**Output.** `data/processed/transcriptions/{doc_id}.json` in the pipeline data contract format (`knowledge/08_DATA_CONTRACT.md`): `pages` at the top level with per-page `transcription`, object metadata under `metadata`, confidence level, and quality signals.
+**Output.** `data/processed/transcriptions/{doc_id}.json` in the pipeline data contract format (`knowledge/08_DATA_CONTRACT.md`). Each page carries the editable `transcription`, the immutable initial `transcription_raw`, and a human-controlled `review` state. The document also carries object metadata, confidence notes, quality signals, the executed prompt log, and a hash-bound list of the exact image bytes supplied to the model.
 
 **API key.** This step requires a key for the configured provider and aborts with a clear message when none is set. Transcriptions produced elsewhere enter the pipeline as contract-conformant JSON instead.
 
 **Key parameters.** `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL`, `CHUNK_SIZE` (default 20 images per API call), `BATCH_DELAY` (default 2 s between documents), `--sample N` (pilot run on first N documents).
 
-**Prompt.** `pipeline/prompts/transcription.md` — four-layer architecture. Layer 1 is the base diplomatic transcription rule set. Layers 2–4 inject document-type instructions, document metadata, and optional per-object overrides at runtime. See the prompt file for the full layer description.
+**Prompt.** `pipeline/prompts/transcription.md` provides the base rules. A document selects `pipeline/prompts/profiles/{prompt_profile}.md` through the source manifest. Step 3 appends its metadata and an optional `pipeline/prompts/objects/{doc_id}.md` override. The exact layer list and combined prompt hash are stored in `_meta`. A declared profile that has no file fails that document instead of silently using generic rules.
+
+**Completeness gate.** The source manifest, local images, inventory, each model chunk, and the assembled response must agree on consecutive page numbers from 1. Step 3 preserves returned page numbers and rejects omissions, duplicates, and additions before writing a transcription file.
+
+**State-aware reuse.** A run without `--force` skips an existing transcription only when its contract, provider, model, assembled prompt, and source-image bytes still match. A stale file stops the object with an instruction to rerun explicitly with `--force`.
 
 **Known limits.** Quality signals in the template are simplified compared to the full seven-signal implementation in szd-htr-ocr-pipeline. The template emits page-type classification and character statistics; marker density, language consistency, and duplicate detection can be adapted from the [szd-htr-ocr-pipeline](https://github.com/chpollin/szd-htr-ocr-pipeline) reference implementation.
 
@@ -146,13 +155,17 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 **Input.** `data/processed/transcriptions/{doc_id}.json`
 
-**Output.** `data/processed/validated/{doc_id}.json` — original transcription (`pages` and `metadata` passed through unchanged) plus rule results, per-page statistics, optional LLM assessments, and an `overall_status` field (`confident` / `needs_review` / `problematic`). The `needs_review` quality signal from step 3 means "unverified transcription" and maps to `needs_review`, not `problematic`; pages gated for insufficient image quality cap the status at `needs_review`.
+**Output.** `data/processed/validated/{doc_id}.json` contains the original pages, metadata, transcription provenance, rule results, per-page statistics, optional LLM assessments, and an automatic `overall_status` field (`confident` / `needs_review` / `problematic`). An input-state hash binds these findings to the exact transcription, review history, metadata, confidence fields, and facsimile provenance that step 4 assessed. The automatic status is a triage signal and leaves the human-controlled page review state unchanged. Insufficient image quality, undeclared empty pages, and document confidence `low` cap it at `needs_review`.
 
 **Key parameters.** `VALIDATION_PROVIDER`, `VALIDATION_MODEL` (both empty → deterministic only), `--no-llm` (force deterministic mode regardless of configuration).
 
 **Deterministic rules.** Counts uncertain-reading markers (`[?]`), illegible-passage markers (`[...]`), OCR artefact patterns (punctuation clusters), and double spaces. Severity thresholds are defined in `pipeline/04_validate.py`.
 
-**Prompt.** `pipeline/prompts/validation.md` — evaluates from palaeographic, linguistic, structural, and plausibility perspectives. Returns confidence level (`confident` / `likely` / `uncertain`) and typed issue list.
+**Prompt.** `pipeline/prompts/validation.md` performs a text-only plausibility assessment. It checks orthographic anomalies, linguistic coherence, transcription markers, and internal structure. It makes no visual or palaeographic claim.
+
+**Human review.** Record page transitions in the canonical transcription file with `uv run python pipeline/update_review.py --object ID --page N --status STATUS --actor REVIEWER`. The permitted sequence is controlled and auditable: a page enters `in_review`, may be returned to `machine_unreviewed`, advances to `human_verified`, and then to `accepted`; accepted pages can be reopened as `in_review`. Re-run steps 4–6 with `--force` after a transition. Automatic validation never changes this state.
+
+**State-aware reuse.** A non-forced run accepts an existing validation only when its input hash and deterministic or model-assisted configuration still match. Changes require an explicit `--force` rerun and cannot silently inherit earlier findings.
 
 **Known limits.** The deterministic rules are tuned for Latin-script handwriting and typography. Corpora in other scripts may require threshold adjustment or additional rules. The LLM judge does not have access to the original images; it evaluates the transcription text only.
 
@@ -160,23 +173,25 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 ### Step 5 — Annotate TEI
 
-**Purpose.** Generate TEI-XML from validated transcriptions. Deterministic mode builds well-formed TEI using string templates. An optional LLM enrichment pass adds named-entity and semantic markup.
+**Purpose.** Generate predictable and diffable TEI-XML from validated transcriptions. The base renderer is deterministic and makes no provider call.
 
-**Input.** `data/processed/validated/{doc_id}.json` (preferred) or `data/processed/transcriptions/{doc_id}.json`
+**Input.** `data/processed/validated/{doc_id}.json`. Step 5 does not bypass the step-4 checkpoint.
 
-**Output.** `data/processed/tei/{doc_id}.xml` (working copy), `results/tei/{doc_id}.xml` (publication copy), `results/reports/{doc_id}_validation.json` (well-formedness and plaintext-similarity check).
+**Output.** `data/processed/tei/{doc_id}.xml` and `results/tei/{doc_id}.xml` are synchronized TEI candidates. `results/reports/{doc_id}_validation.json` records well-formedness, required elements, ordered text preservation, and the project-configuration hash. A candidate becomes a published scholarly edition only after the selected RelaxNG check, scholarly review, and user acceptance.
 
-**Key parameters.** `ANNOTATION_PROVIDER`, `ANNOTATION_MODEL` (both empty → deterministic only), `--no-llm`, `--validate-only` (generate and check but do not write TEI), `--sample N`.
+**Key parameters.** `--validate-only` generates and checks without writing TEI. `--sample N` processes a bounded sample.
 
-**Schemas.** `schemas/dtabf.json` provides machine-readable DTABf structural guidance for the annotation prompt; `schemas/basisformat.rng` is the official DTABf RelaxNG schema for full conformance validation before publication. Roles, validation commands, and how to substitute a different TEI profile are documented in [`schemas/README.md`](schemas/README.md).
+**Schemas.** `schemas/tei_all.rng` is the runnable default validation target. `schemas/basisformat.rng` provides the stricter DTABf alternative. Roles, validation commands, and schema substitution are documented in [`schemas/README.md`](schemas/README.md).
 
-**Prompt.** `pipeline/prompts/annotation.md` — three-layer architecture. Layer 1 defines base TEI rules (well-formedness, plaintext preservation, confidence and responsibility attributes). Layer 2 injects project context from `knowledge/01_PROJECT.md`. Layer 3 loads the mapping rules from `knowledge/04_TEI_MAPPING.md`.
+**Project mapping.** The script reads project metadata from `knowledge/01_PROJECT.md`. `knowledge/04_TEI_MAPPING.md` specifies additional corpus structures and semantic annotations for a project-specific deterministic extension or a separate documented stage. The base renderer does not inject that document into a model prompt.
 
-**Plaintext preservation.** After generation, the script computes word-set similarity between the source transcription and the generated TEI body. Similarity below 0.95 triggers a warning; below 0.80 is flagged as low. This check catches annotation errors where the model altered the text content.
+**Text preservation.** After generation, the script reconstructs transcription markers from the TEI and compares every page as an ordered character sequence after layout-whitespace normalization. Missing pages, reordered text, and lost repetitions block the TEI write. `~~text~~`, `{text}`, `word[?]`, `[...]`, and `[... ~N chars]` map deterministically to `del`, `add`, `unclear`, and `gap`.
 
 **Structure.** Deterministic TEI splits page text on blank lines into `<p>` elements; within a paragraph, line breaks become `<lb/>` unless the edition type in `knowledge/01_PROJECT.md` is normalised. Object dates and repositories become `origDate` and `repository` in the source description. Remote facsimile URLs from `metadata.image_urls` produce a `<facsimile>` block with `graphic url`, referenced from `<pb facs="#facs_N"/>`. Page-level fields from the data contract are honoured: foreign text becomes `<note type="foreign">`, quality-gated pages get `<note type="gate">`, and empty pages without a declared `page_type` are marked `<note type="empty">` for verification.
 
-**Known limits.** Complex layouts (nested tables, verse, apparatus) require LLM enrichment and project-specific mapping rules. The LLM enrichment pass does not yet support cross-document entity resolution; each document is annotated independently.
+**Review and reproducibility.** `revisionDesc/@status` records the least mature page review state. Its change entry identifies the timestamp of the validated input state and hashes the transcription instrument, executed prompts, validation state, and project configuration. The same validated JSON and project configuration therefore produce identical TEI bytes.
+
+**Known limits.** The base renderer covers metadata, pages, paragraphs, line breaks, facsimile references, and declared page-state notes. Nested tables, verse, apparatus, semantic entities, and cross-document entity resolution require project-specific implementation and verification.
 
 ---
 
@@ -194,15 +209,15 @@ Enable GitHub Pages in your repository settings (source: deploy from branch, bra
 
 ### Step 6 — Build frontend
 
-**Purpose.** Extract text and metadata from TEI files and generate the JSON data layer for the static curation frontend in `docs/`. The frontend is not a mere display viewer; the facsimile-text comparison view is where the Critical Expert in the Loop inspects and verifies transcription and annotation quality against the original images, before and after publication.
+**Purpose.** Extract text, metadata, and the human review status from TEI files and generate the JSON data layer for the static frontend in `docs/`. Its facsimile-text view supports inspection. Corrections and status transitions remain explicit operations on the edition data.
 
 **Input.** `results/tei/*.xml`, `knowledge/01_PROJECT.md`, `knowledge/05_DESIGN.md`
 
-**Output.** `docs/data/catalog.json` (project-level index), `docs/data/{doc_id}.json` (per-document data with pages, text, image paths), and `docs/tei/{doc_id}.xml` (downloadable TEI). Local facsimiles resolved via the shared image root are copied to `docs/images/{doc_id}/` so the static site can serve them; remote facsimile URLs from the TEI `<facsimile>` block are rendered directly. `has_images` reflects what the viewer can actually show. The frontend HTML/CSS/JS in `docs/` is static and pre-existing; this step fills its publication assets.
+**Output.** `docs/data/catalog.json` (project-level index), `docs/data/{doc_id}.json` (per-document data with pages, text, image paths), and `docs/tei/{doc_id}.xml` (downloadable TEI). Local facsimiles are copied atomically to `docs/images/{doc_id}/`. A TEI source-image hash requires those exact bytes; a fresh Pages checkout may verify the committed publication snapshot when ignored source folders are absent. Remote URLs remain direct only for external TEI without a source-image hash. The build removes stale TEI, object data, withdrawn object folders, and obsolete page files. `has_images` reflects what the viewer can actually show.
 
 **Key parameters.** `--force` (regenerate all data files), `--serve` (start local HTTP server on port 8080).
 
-**Known limits.** The default frontend in `docs/` provides catalog, full-text search, and the facsimile-text curation view. Research-specific components (concordance, timeline, named-entity registers) require additional JavaScript; they are implemented by Claude Code when specified in `knowledge/05_DESIGN.md` but are not part of the base template.
+**Known limits.** The default frontend provides a catalog filter, human-review status labels, a read-only facsimile-text view, TEI download, and plaintext export. It has no corpus-wide full-text index, correction editor, annotation editor, or acceptance control. Research-specific components require implementation and verification in the edition fork.
 
 ## Repository structure
 
@@ -217,6 +232,8 @@ agentic-edition-pipeline/
 │   ├── 04_TEI_MAPPING.md        # Source structure → TEI element mapping
 │   ├── 05_DESIGN.md             # Epics, user stories, UI components, wireframes
 │   ├── 08_DATA_CONTRACT.md      # Pipeline data contract (transcription JSON schema)
+│   ├── lineage.md               # Provenance and role of the reference projects
+│   ├── case-comparison.md       # Comparison of Hersch/ZBZ, SZD, and DoCTA
 │   ├── decisions.md             # Architecture Decision Records
 │   └── journal.md               # Development journal
 ├── pipeline/                    # Python scripts (6 steps + infrastructure)
@@ -229,14 +246,15 @@ agentic-edition-pipeline/
 │   ├── 05_annotate_tei.py       # TEI-XML generation with validation
 │   ├── 06_build_frontend.py     # TEI → static site data + local server
 │   ├── fetch_facsimiles.py      # Utility: materialize remote facsimile URLs locally
-│   └── prompts/                 # Prompt templates (transcription, validation, annotation)
-├── schemas/                     # DTABf encoding profile (JSON) + official RelaxNG, see schemas/README.md
+│   └── prompts/                 # Transcription and validation prompt templates
+├── schemas/                     # TEI All and DTABf RelaxNG schemas, see schemas/README.md
 ├── tests/                       # Pytest checks for the data contract and TEI generation
 ├── examples/offline-quickstart/ # Synthetic corpus and isolated offline runner
-├── docs/                        # Static curation frontend (GitHub Pages root)
+├── docs/                        # Static verification frontend (GitHub Pages root)
 ├── data/sources/                # Input data (your source material)
+│   └── manifest.json            # Optional catalogue, remote pages, prompt profiles
 ├── data/processed/              # Intermediate results (generated)
-└── results/tei/                 # Final TEI-XML files
+└── results/tei/                 # TEI candidates awaiting project gates
 ```
 
 ## Methodology
@@ -247,39 +265,40 @@ agentic-edition-pipeline/
 
 **Epistemic Infrastructure.** The ensemble of mechanisms that make LLM-generated results verifiable, curatable, and documentable. Provenance metadata in every generated file. Architecture Decision Records. Session journal. Quality signals at every pipeline stage.
 
-## Reference projects
+## Research cases
 
-This template distils knowledge and code from four production-grade repositories. Each has a `knowledge/` folder with synthesized project knowledge.
+Three real edition projects carry the research contribution of the Agentic Edition Pipeline.
 
-| Repository | Corpus | Strength |
-|---|---|---|
-| [zbz-ocr-tei](https://github.com/chpollin/zbz-ocr-tei) | 286 docs, 4152 pages (Jeanne Hersch) | End-to-end PDF→TEI, epistemic infrastructure |
-| [szd-htr-ocr-pipeline](https://github.com/chpollin/szd-htr-ocr-pipeline) | 2107 objects, 18719 scans (Stefan Zweig) | Prompt grouping, quality signals, live viewer |
-| [co-ocr-htr](https://github.com/DigitalHumanitiesCraft/co-ocr-htr) | Browser-based workbench | Multi-provider LLM, hybrid validation, PAGE-XML |
-| [teiCrafter](https://github.com/DigitalHumanitiesCraft/teiCrafter) | Browser-based annotation | TEI prompt architecture, schema guidance |
+| Project | Corpus | Contribution | Relationship to this repository |
+|---|---|---|---|
+| `zbz-ocr-tei` (private research repository) | 285 catalogued documents and 4,117 pages from the Jeanne Hersch edition | End-to-end source processing, stream-level human review, project schema, and verifiable curation | Foundational case that predates the reusable template |
+| [szd-htr-ocr-pipeline](https://github.com/chpollin/szd-htr-ocr-pipeline) | 2,452 catalogued objects and 17,132 pages from the Stefan Zweig collection | Corpus-scale HTR, material-specific prompt profiles, calibrated quality signals, and a curation viewer | Foundational case that predates the reusable template |
+| [DoCTA](https://github.com/DigitalHumanitiesCraft/DoCTA) | Edition subset of 65 registered documents and 692 pages within an indexed corpus of 115 documents and 12,236 pages from Tyrolean court records | Transkribus and IIIF integration, review return path, entity extraction, arithmetic checks, deterministic TEI, and a project schema | Architectural transfer into an independently developed repository |
 
-### Planned production forks
+`co-ocr-htr` and `teiCrafter` supplied additional implementation patterns for provider abstraction, validation, PAGE XML, TEI editing, and schema handling. They support the reusable core but are not counted among the three primary research cases.
 
-The first edition projects to be built as forks of this generalised template are planned but not yet run. They will serve as the first real-world validation of the template and feed the resulting learnings back into its structure.
+[`knowledge/case-comparison.md`](knowledge/case-comparison.md) compares the three repositories across source entry, prompt routing, working formats, review states, evaluation, TEI generation, and publication. It also records which shared requirements are implemented in this template and which functions remain project-specific.
 
-| Planned fork | Corpus | Status |
-|---|---|---|
-| zbz-ocr-tei | Jeanne Hersch writings (Zentralbibliothek Zürich) | Placeholder — test run pending |
-| SZD | Stefan Zweig papers (Literaturarchiv Salzburg) | Placeholder — test run pending |
+### Verification artefacts
 
-Both entries are placeholders until the first fork test run is complete. The links and instantiation details will be added once the runs have taken place.
+The offline quickstart and the local Schuchardt letters instance test the reusable software. They provide technical evidence and are not additional research cases.
+
+| Artefact | Evidenced state |
+|---|---|
+| `examples/offline-quickstart/` | Current deterministic command-line path verified on two synthetic objects |
+| local `hsa-letters-pipeline` | Eighteen real letters processed from prepared transcription through TEI, frontend, and evaluation; provider path untested |
 
 ## Quality framework
 
-Every forked edition structurally addresses the [IDE criteria for reviewing digital scholarly editions](https://www.i-d-e.de/publikationen/weitereschriften/criteria-version-1-1) (v1.1), [tools](https://www.i-d-e.de/publikationen/weitereschriften/criteria-tools-version-1) (v1), and [text collections](https://www.i-d-e.de/publikationen/weitereschriften/criteria-text-collections-version-1-0) (v1.0). See `knowledge/00_INDEX.md` for the RIDE self-assessment checklist.
+`knowledge/00_INDEX.md` provides a preparation checklist derived from the [IDE criteria for reviewing digital scholarly editions](https://www.i-d-e.de/publikationen/weitereschriften/criteria-version-1-1) (v1.1). It separates structural support supplied by the template from project evidence, formal checks, scholarly review, rights clearance, usability assessment, and user acceptance.
 
 ### Evaluation module `aep_eval`
 
 `aep_eval` evaluates existing outputs against references without touching them: character error rate under a declared normalisation profile and TEI conformance against an explicitly named RelaxNG schema. A fixture manifest (`schemas/evaluation-fixture.schema.json`) names hypothesis, reference, scope, reference class, maturity tier, Git anchor and file hashes; the run writes `results.json` (`schemas/evaluation-result.schema.json`) and `report.md`.
 
 ```
-python -m aep_eval tests/fixtures/evaluation/manifest.json --out results/evaluation
-python -m aep_eval MANIFEST --out DIR --strict      # exit 1 when any TEI file is invalid
+uv run python -m aep_eval tests/fixtures/evaluation/manifest.json --out results/evaluation
+uv run python -m aep_eval MANIFEST --out DIR --strict      # exit 1 when any TEI file is invalid
 ```
 
 Profiles in v0.1: `hsa-strict` (whitespace collapsed, case and punctuation kept, edition reference without editorial notes, transcription conventions resolved; aggregate char-weighted) and `zbz-fidelity` (zbz-ocr-tei extraction and symmetric normalisation, fidelity share of the edit distance; aggregate fixture mean). There is no universal profile; every result names the profile it was computed under. Exit codes: 0 clean, 1 fixture errors, 2 unusable manifest. Design decision: `knowledge/decisions.md`, ADR-006.

@@ -38,7 +38,7 @@
         state.catalog = d.items || d.objects || [];
       }
       state.catalog.forEach(function (o) {
-        if (o.pages == null && o.page_count != null) o.pages = o.page_count;
+        if (o.page_count == null && o.pages != null) o.page_count = o.pages;
       });
       if (state.projectTitle) { titleEl.textContent = state.projectTitle; document.title = state.projectTitle; }
     });
@@ -54,7 +54,6 @@
   function getRoute() {
     var h = window.location.hash.replace(/^#\/?/, "");
     if (!h || h === "catalog") return { view: "catalog" };
-    if (h === "indices") return { view: "indices" };
     var m = h.match(/^viewer\/(.+)$/);
     return m ? { view: "viewer", id: decodeURIComponent(m[1]) } : { view: "catalog" };
   }
@@ -66,7 +65,7 @@
       app.innerHTML = "<p>Lade&hellip;</p>";
       loadObject(route.id).then(function () { renderViewer(route.id); })
         .catch(function (e) { app.innerHTML = '<p class="catalog-empty">Fehler: ' + esc(e.message) + "</p>"; });
-    } else if (route.view === "indices") { renderIndices(); }
+    }
   }
   function updateActiveNav(view) {
     document.querySelectorAll(".nav-link").forEach(function (l) {
@@ -79,8 +78,9 @@
   function renderCatalog() {
     if (!state.catalog) { app.innerHTML = '<p class="catalog-empty">Kein Katalog geladen.</p>'; return; }
     var cols = [
-      { key: "title", label: "Titel" }, { key: "date", label: "Datum" },
-      { key: "language", label: "Sprache" }, { key: "pages", label: "Seiten" },
+      { key: "title", label: "Titel" }, { key: "signature", label: "Signatur" },
+      { key: "date", label: "Datum" },
+      { key: "language", label: "Sprache" }, { key: "page_count", label: "Seiten" },
       { key: "status", label: "Status" }
     ];
     var html = '<input type="search" class="search-input" placeholder="Suche nach Titel oder Datum&hellip;" aria-label="Katalog durchsuchen">';
@@ -91,12 +91,12 @@
     });
     html += "</tr></thead><tbody>";
     var items = sortItems(state.catalog.slice());
-    if (!items.length) { html += '<tr><td colspan="5" class="catalog-empty">Keine Eintr&auml;ge.</td></tr>'; }
+    if (!items.length) { html += '<tr><td colspan="6" class="catalog-empty">Keine Eintr&auml;ge.</td></tr>'; }
     else { items.forEach(function (it) {
       html += "<tr>";
       html += '<td><a href="#viewer/' + encodeURIComponent(it.id) + '">' + esc(it.title || it.id) + "</a></td>";
-      html += "<td>" + esc(it.date || "") + "</td><td>" + esc(it.language || "") + "</td>";
-      html += "<td>" + (it.pages != null ? it.pages : "") + "</td>";
+      html += "<td>" + esc(it.signature || "") + "</td><td>" + esc(it.date || "") + "</td><td>" + esc(it.language || "") + "</td>";
+      html += "<td>" + (it.page_count != null ? it.page_count : "") + "</td>";
       html += "<td>" + badgeHtml(it.status) + "</td></tr>";
     }); }
     html += "</tbody></table>";
@@ -126,7 +126,17 @@
   }
   function badgeHtml(s) {
     if (!s) return "";
-    return '<span class="badge badge-' + s.replace(/\s+/g, "_") + '">' + esc(s) + "</span>";
+    var labels = {
+      machine_unreviewed: "Maschinell, ungepr&uuml;ft",
+      in_review: "In Pr&uuml;fung",
+      human_verified: "Menschlich gepr&uuml;ft",
+      accepted: "Abgenommen",
+      confident: "Automatisch unauff&auml;llig",
+      needs_review: "Automatische Pr&uuml;fung n&ouml;tig",
+      problematic: "Automatischer Problembefund"
+    };
+    return '<span class="badge badge-' + s.replace(/\s+/g, "_") + '">' +
+      (labels[s] || esc(s)) + "</span>";
   }
   function filterCatalog(q) {
     q = q.toLowerCase();
@@ -141,6 +151,7 @@
     if (!obj) return;
     var pages = obj.pages || [], has = pages.length > 0;
     var html = '<div class="viewer-header"><h2>' + esc(obj.title || objectId) + "</h2>";
+    html += badgeHtml(obj.status);
     html += '<div class="viewer-actions">';
     html += '<button class="btn" id="btn-tei">TEI-XML herunterladen</button>';
     html += '<button class="btn" id="btn-txt">Plaintext exportieren</button>';
@@ -168,10 +179,11 @@
     if (!pg) return;
     var ip = document.getElementById("img-panel"), tp = document.getElementById("txt-panel");
     var ct = document.getElementById("pg-count");
-    if (pg.image) ip.innerHTML = '<img src="' + esc(pg.image) + '" alt="Faksimile Seite ' + (state.currentPage + 1) + '">';
+    var label = pg.label || String(state.currentPage + 1);
+    if (pg.image) ip.innerHTML = '<img src="' + esc(pg.image) + '" alt="Faksimile Seite ' + esc(label) + '">';
     else ip.innerHTML = '<span class="no-image">Kein Bild verf&uuml;gbar</span>';
     tp.textContent = pg.text || "(kein Text)";
-    ct.textContent = "Seite " + (state.currentPage + 1) + " von " + pages.length;
+    ct.textContent = "Seite " + label + " (" + (state.currentPage + 1) + " von " + pages.length + ")";
     document.getElementById("btn-prev").disabled = state.currentPage === 0;
     document.getElementById("btn-next").disabled = state.currentPage >= pages.length - 1;
   }
@@ -191,42 +203,9 @@
     var obj = state.currentObject;
     if (!obj || !obj.pages) return;
     var txt = obj.pages.map(function (p, i) {
-      return "--- Seite " + (i + 1) + " ---\n" + (p.text || "");
+      return "--- Seite " + (p.label || (i + 1)) + " ---\n" + (p.text || "");
     }).join("\n\n");
     triggerDownload(new Blob([txt], { type: "text/plain;charset=utf-8" }), id + ".txt");
-  }
-
-  // -- Indices view --
-  function renderIndices() {
-    if (!state.catalog || !state.catalog.length) {
-      app.innerHTML = '<p class="catalog-empty">Kein Katalog geladen.</p>'; return;
-    }
-    var entries = [];
-    state.catalog.forEach(function (it) {
-      if (it.annotations && Array.isArray(it.annotations)) {
-        it.annotations.forEach(function (a) { entries.push({ label: a, id: it.id, title: it.title || it.id }); });
-      } else { entries.push({ label: it.title || it.id, id: it.id, title: it.title || it.id }); }
-    });
-    entries.sort(function (a, b) { return a.label.localeCompare(b.label, "de"); });
-    var groups = {};
-    entries.forEach(function (e) {
-      var l = e.label.charAt(0).toUpperCase();
-      if (!/[A-Z\u00C4\u00D6\u00DC]/.test(l)) l = "#";
-      if (!groups[l]) groups[l] = [];
-      groups[l].push(e);
-    });
-    var letters = Object.keys(groups).sort(function (a, b) { return a.localeCompare(b, "de"); });
-    var html = "<h2>Indizes</h2>";
-    letters.forEach(function (l) {
-      html += '<div class="indices-group"><h3>' + esc(l) + "</h3><ul class=\"indices-list\">";
-      groups[l].forEach(function (e) {
-        html += '<li><a href="#viewer/' + encodeURIComponent(e.id) + '">' + esc(e.label) + "</a>";
-        if (e.label !== e.title) html += ' <span class="indices-ref">(' + esc(e.title) + ")</span>";
-        html += "</li>";
-      });
-      html += "</ul></div>";
-    });
-    app.innerHTML = html;
   }
 
   // -- Init --

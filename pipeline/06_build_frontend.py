@@ -8,11 +8,13 @@ generates the data layer.
 Outputs:
   docs/data/catalog.json   -- project-level index of all objects
   docs/data/{object_id}.json -- per-object data with pages, text, image paths
-  docs/tei/{object_id}.xml -- downloadable publication copy
+  docs/tei/{object_id}.xml -- downloadable mirror of the gated TEI candidate
 """
+
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.server
 import json
 import os
@@ -25,6 +27,7 @@ from pathlib import Path
 
 from lxml import etree
 
+import contract
 from config import (
     DOCS_DATA_DIR,
     DOCS_DIR,
@@ -33,8 +36,12 @@ from config import (
     RESULTS_TEI_DIR,
     ensure_dirs,
     list_page_images,
+    ordered_page_images,
     read_knowledge,
-    resolve_image_dir,
+    source_image_state_hash,
+    write_bytes_atomic,
+    write_errors,
+    write_json_atomic,
 )
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -44,6 +51,7 @@ NS = {"tei": TEI_NS}
 # ---------------------------------------------------------------------------
 # Project name extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_project_name(md_text: str) -> str:
     """Get the project name from 01_PROJECT.md.
@@ -70,6 +78,7 @@ def _extract_project_name(md_text: str) -> str:
 # TEI metadata extraction
 # ---------------------------------------------------------------------------
 
+
 def _text_of(element: etree._Element | None) -> str:
     """Get the text content of an element, or empty string if None."""
     if element is None:
@@ -78,7 +87,7 @@ def _text_of(element: etree._Element | None) -> str:
 
 
 def extract_metadata(root: etree._Element) -> dict:
-    """Extract title, date, and language from teiHeader."""
+    """Extract catalog metadata and the human review status from teiHeader."""
     meta: dict[str, str] = {}
 
     # Title from titleStmt
@@ -104,6 +113,18 @@ def extract_metadata(root: etree._Element) -> dict:
     else:
         meta["language"] = ""
 
+    revision = root.find(f".//{{{TEI_NS}}}revisionDesc")
+    meta["status"] = revision.get("status", "") if revision is not None else ""
+    signature = root.find(
+        f".//{{{TEI_NS}}}msIdentifier/{{{TEI_NS}}}idno[@type='shelfmark']"
+    )
+    meta["signature"] = _text_of(signature)
+    change = root.find(f".//{{{TEI_NS}}}revisionDesc/{{{TEI_NS}}}change")
+    change_text = "" if change is None else "".join(change.itertext())
+    meta["input_state_timestamp"] = change.get("when", "") if change is not None else ""
+    source_hash = re.search(r"\bsource_images_hash=([0-9a-f]{12})\b", change_text)
+    meta["source_images_hash"] = source_hash.group(1) if source_hash else ""
+
     return meta
 
 
@@ -111,25 +132,18 @@ def extract_metadata(root: etree._Element) -> dict:
 # Text extraction -- split by <pb/> into pages
 # ---------------------------------------------------------------------------
 
-def _strip_tags(text: str) -> str:
-    """Remove XML tags from a string, keeping only text content."""
-    return re.sub(r"<[^>]+>", "", text)
 
-
-def _normalize_page_text(chunk: str) -> str:
-    """Turn a serialized TEI chunk into display text.
-
-    <lb/> becomes a line break, </p> a paragraph break. The indentation
-    whitespace that pretty-printed TEI carries into text nodes is stripped
-    per line, and blank-line runs collapse to one paragraph separator.
-    """
-    chunk = re.sub(r"<lb\s*/>", "\n", chunk)
-    chunk = re.sub(r"</p>", "\n\n", chunk)
-    text = _strip_tags(chunk)
+def _normalize_page_text(text: str) -> str:
+    """Normalize display whitespace collected from the parsed XML tree."""
     lines = [ln.strip() for ln in text.split("\n")]
     text = "\n".join(lines)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _local_name(element: etree._Element) -> str:
+    """Return the namespace-independent local name of an XML element."""
+    return etree.QName(element).localname
 
 
 def extract_facsimile_urls(root: etree._Element) -> dict[str, str]:
@@ -145,11 +159,11 @@ def extract_facsimile_urls(root: etree._Element) -> dict[str, str]:
 
 
 def extract_pages(root: etree._Element) -> list[dict]:
-    """Split body content by <pb/> elements into per-page text chunks.
+    """Extract pages in document order from any namespace-prefix spelling.
 
-    Each page gets the plain text between its <pb/> and the next <pb/>
-    (or end of body). Image references come from the facs attribute on
-    <pb/>; a '#facs_N' pointer resolves to the <facsimile> graphic URL.
+    TEI ``pb/@n`` is an arbitrary source label, so the viewer uses document
+    order as its numeric sequence and preserves ``@n`` separately as label.
+    A TEI body without page breaks becomes one viewer page.
     """
     body = root.find(f".//{{{TEI_NS}}}body")
     if body is None:
@@ -157,35 +171,51 @@ def extract_pages(root: etree._Element) -> list[dict]:
 
     facs_urls = extract_facsimile_urls(root)
 
-    # Serialize body to string so we can split on <pb/> reliably.
-    # This avoids complex tree walking for mixed-content elements.
-    body_str = etree.tostring(body, encoding="unicode")
-
-    # Split on <pb .../> -- capture the element to extract attributes
-    parts = re.split(r"(<pb\s[^>]*/>)", body_str)
-
+    page_parts: list[list[str]] = []
     pages: list[dict] = []
-    current_facs = ""
-    current_n = ""
+    current_parts: list[str] | None = None
 
-    for part in parts:
-        if re.match(r"<pb\s", part):
-            # Attribute order varies; search each attribute independently.
-            n_match = re.search(r'\bn="(\d+)"', part)
-            facs_match = re.search(r'\bfacs="([^"]*)"', part)
-            current_n = n_match.group(1) if n_match else ""
-            current_facs = facs_match.group(1) if facs_match else ""
-            continue
+    def start_page(page_break: etree._Element | None = None) -> None:
+        nonlocal current_parts
+        sequence = len(pages) + 1
+        label = page_break.get("n", "") if page_break is not None else ""
+        facs_pointer = page_break.get("facs", "") if page_break is not None else ""
+        current_parts = []
+        page_parts.append(current_parts)
+        pages.append(
+            {
+                "page": sequence,
+                "label": label or str(sequence),
+                "text": "",
+                "image": facs_urls.get(facs_pointer, facs_pointer),
+            }
+        )
 
-        # This is a text chunk belonging to the current page
-        if current_n:
-            facs = facs_urls.get(current_facs, current_facs)
-            pages.append({
-                "page": int(current_n),
-                "text": _normalize_page_text(part),
-                "image": facs,
-            })
+    def append_text(value: str | None) -> None:
+        if current_parts is not None and value:
+            current_parts.append(value)
 
+    def walk(element: etree._Element) -> None:
+        append_text(element.text)
+        for child in element:
+            name = _local_name(child)
+            if name == "pb":
+                start_page(child)
+            elif name == "lb":
+                append_text("\n")
+            else:
+                walk(child)
+                if name in {"p", "ab", "head", "item", "note"}:
+                    append_text("\n\n")
+            append_text(child.tail)
+
+    has_page_breaks = any(_local_name(element) == "pb" for element in body.iter())
+    if not has_page_breaks:
+        start_page()
+    walk(body)
+
+    for page, parts in zip(pages, page_parts, strict=True):
+        page["text"] = _normalize_page_text("".join(parts))
     return pages
 
 
@@ -193,7 +223,37 @@ def extract_pages(root: etree._Element) -> list[dict]:
 # Build data files
 # ---------------------------------------------------------------------------
 
-def _attach_images(object_id: str, pages: list[dict]):
+
+def _validated_docs_image_dir(object_id: str) -> Path:
+    """Resolve one object image directory without following linked components."""
+    if not contract.valid_object_id(object_id):
+        raise ValueError(f"facsimile object ID is not path-safe: {object_id!r}")
+    docs_root = DOCS_DIR.absolute()
+    images_root = (DOCS_DIR / "images").absolute()
+    object_dir = (images_root / object_id).absolute()
+    if docs_root not in images_root.parents or images_root not in object_dir.parents:
+        raise ValueError(f"facsimile publication directory escaped docs: {object_dir}")
+    for component in (docs_root, images_root, object_dir):
+        if _is_link_or_reparse_point(component):
+            raise ValueError(
+                f"refusing facsimile publication through symlink or reparse point: "
+                f"{component}"
+            )
+    resolved_docs = docs_root.resolve()
+    resolved_images = images_root.resolve()
+    resolved_object = object_dir.resolve()
+    if resolved_docs not in resolved_images.parents:
+        raise ValueError(f"facsimile image root escaped docs: {images_root}")
+    if resolved_images not in resolved_object.parents:
+        raise ValueError(f"facsimile object directory escaped image root: {object_dir}")
+    return resolved_object
+
+
+def _attach_images(
+    object_id: str,
+    pages: list[dict],
+    expected_source_hash: str = "",
+) -> None:
     """Resolve page images and make them servable from docs/.
 
     Remote URLs (from <facsimile> graphic url) are kept as-is; the viewer
@@ -201,48 +261,94 @@ def _attach_images(object_id: str, pages: list[dict]):
     resolver are copied to docs/images/{id}/ because the static frontend
     can only serve files below docs/. Page order maps local files to pages.
     """
-    image_dir = resolve_image_dir(object_id)
-    local_files = list_page_images(image_dir) if image_dir else []
-    docs_image_dir = DOCS_DIR / "images" / object_id
+    docs_image_dir = _validated_docs_image_dir(object_id)
+    local_files = ordered_page_images(object_id)
+    if not local_files and docs_image_dir.is_dir():
+        local_files = list_page_images(docs_image_dir)
+    local_bytes = [path.read_bytes() for path in local_files]
+    if expected_source_hash:
+        byte_state = [
+            {
+                "page": page,
+                "filename": path.name,
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+            for page, (path, content) in enumerate(
+                zip(local_files, local_bytes, strict=True), start=1
+            )
+        ]
+        actual_hash = source_image_state_hash(byte_state)
+        if actual_hash != expected_source_hash:
+            raise ValueError(
+                "current facsimiles differ from the transcription source state"
+            )
 
+    published_filenames: set[str] = set()
     for i, page in enumerate(pages):
         current = page.get("image", "")
-        if current.startswith("http://") or current.startswith("https://"):
+        if not expected_source_hash and current.startswith(("http://", "https://")):
             continue
         if i < len(local_files):
             src = local_files[i]
             docs_image_dir.mkdir(parents=True, exist_ok=True)
+            docs_image_dir = _validated_docs_image_dir(object_id)
             dst = docs_image_dir / src.name
-            if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime:
-                shutil.copy2(src, dst)
+            content = local_bytes[i]
+            if not dst.exists() or dst.read_bytes() != content:
+                write_bytes_atomic(dst, content)
             page["image"] = f"images/{object_id}/{src.name}"
+            published_filenames.add(src.name)
         else:
             page["image"] = ""
+
+    if docs_image_dir.is_dir():
+        docs_image_dir = _validated_docs_image_dir(object_id)
+        for stale in docs_image_dir.iterdir():
+            if _is_link_or_reparse_point(stale) or not stale.is_file():
+                raise ValueError(
+                    f"refusing unexpected facsimile publication path: {stale}"
+                )
+            if stale.name not in published_filenames:
+                stale.unlink()
 
 
 def process_tei(tei_path: Path) -> dict | None:
     """Parse a TEI file and return its data dict, or None on error."""
     try:
         tree = etree.parse(str(tei_path))
-    except etree.XMLSyntaxError as exc:
+    except (etree.XMLSyntaxError, OSError) as exc:
         print(f"  SKIP {tei_path.stem} (XML parse error: {exc})")
         return None
 
     root = tree.getroot()
     object_id = tei_path.stem
+    if not contract.valid_object_id(object_id):
+        print(f"  SKIP {object_id!r} (object ID is not path-safe)")
+        return None
     meta = extract_metadata(root)
     pages = extract_pages(root)
 
-    _attach_images(object_id, pages)
+    try:
+        _attach_images(object_id, pages, meta.get("source_images_hash", ""))
+    except (OSError, ValueError) as exc:
+        print(f"  SKIP {tei_path.stem} (facsimile contract: {exc})")
+        return None
     # has_images reflects what the viewer can actually show: a copied local
     # file or a remote facsimile URL on at least one page.
     has_images = any(p.get("image") for p in pages)
 
     return {
+        "_meta": {
+            "script": "06_build_frontend.py",
+            "source_hash": hashlib.sha256(tei_path.read_bytes()).hexdigest()[:12],
+            "input_state_timestamp": meta.get("input_state_timestamp", ""),
+        },
         "id": object_id,
         "title": meta.get("title", object_id),
         "date": meta.get("date", ""),
         "language": meta.get("language", ""),
+        "signature": meta.get("signature", ""),
+        "status": meta.get("status", ""),
         "pages": pages,
         "has_images": has_images,
     }
@@ -252,7 +358,6 @@ def _copy_tei_asset(tei_path: Path) -> None:
     """Copy the canonical TEI into the static publication root."""
     publication_dir = _validated_tei_publication_dir()
     publication_dir.mkdir(parents=True, exist_ok=True)
-    publication_dir = _validated_tei_publication_dir()
     destination = publication_dir / tei_path.name
     legacy_temporary = destination.with_suffix(f"{destination.suffix}.tmp")
     destination_exists = _validate_publication_file(destination, publication_dir)
@@ -297,7 +402,7 @@ def _publish_tei_asset(tei_path: Path) -> None:
     try:
         _copy_tei_asset(tei_path)
     except OSError as exc:
-        print(f"  FAIL {tei_path.stem} (TEI publication copy: {exc})", file=sys.stderr)
+        print(f"  FAIL {tei_path.stem} (TEI download mirror: {exc})", file=sys.stderr)
         raise
 
 
@@ -368,7 +473,9 @@ def _validated_tei_publication_dir() -> Path:
     resolved_docs = docs_root.resolve()
     resolved_publication = publication_dir.resolve()
     if resolved_project not in resolved_docs.parents:
-        raise ValueError(f"resolved docs directory escaped the project root: {docs_root}")
+        raise ValueError(
+            f"resolved docs directory escaped the project root: {docs_root}"
+        )
     if resolved_docs not in resolved_publication.parents:
         raise ValueError(
             f"resolved TEI publication directory escaped the docs root: {publication_dir}"
@@ -387,16 +494,65 @@ def _remove_stale_tei_assets(published_names: set[str]) -> None:
             asset.unlink()
 
 
-def build_all(force: bool) -> list[str]:
+def _remove_stale_frontend_assets(published_ids: set[str]) -> None:
+    """Remove object data and facsimiles that are no longer publishable."""
+    docs_root = DOCS_DIR.resolve()
+    data_root = DOCS_DATA_DIR.resolve()
+    if docs_root not in data_root.parents:
+        raise ValueError(f"frontend data directory is outside docs: {data_root}")
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for asset in DOCS_DATA_DIR.glob("*.json"):
+        if asset.name in {"catalog.json", "errors.json"} or asset.stem in published_ids:
+            continue
+        if _is_link_or_reparse_point(asset) or not asset.is_file():
+            raise ValueError(f"refusing stale frontend data path: {asset}")
+        asset.unlink()
+
+    images_root = DOCS_DIR / "images"
+    if not images_root.exists():
+        return
+    if _is_link_or_reparse_point(images_root) or not images_root.is_dir():
+        raise ValueError(f"refusing frontend image root: {images_root}")
+    resolved_images_root = images_root.resolve()
+    if docs_root not in resolved_images_root.parents:
+        raise ValueError(f"frontend image directory is outside docs: {images_root}")
+
+    for object_dir in images_root.iterdir():
+        if not object_dir.is_dir():
+            continue
+        if _is_link_or_reparse_point(object_dir):
+            raise ValueError(f"refusing stale frontend image path: {object_dir}")
+        if resolved_images_root not in object_dir.resolve().parents:
+            raise ValueError(f"frontend image path escaped its root: {object_dir}")
+        if object_dir.name in published_ids:
+            continue
+        for descendant in object_dir.rglob("*"):
+            if _is_link_or_reparse_point(descendant):
+                raise ValueError(
+                    f"refusing linked stale frontend image path: {descendant}"
+                )
+            if resolved_images_root not in descendant.resolve().parents:
+                raise ValueError(f"frontend image path escaped its root: {descendant}")
+        shutil.rmtree(object_dir)
+
+
+def build_all(force: bool) -> list[dict]:
     """Scan all TEI files and generate frontend data.
 
-    Returns the ids of the files that could not be processed, so a silently
-    missing object does not look like a clean build.
+    Returns item-level error records, so a missing object cannot look like a
+    clean build and one broken input does not suppress the remaining objects.
     """
     tei_files = sorted(RESULTS_TEI_DIR.glob("*.xml"))
     if not tei_files:
         _remove_stale_tei_assets(set())
+        _remove_stale_frontend_assets(set())
         print(f"No TEI files found in {RESULTS_TEI_DIR}", file=sys.stderr)
+        sys.exit(1)
+    id_problems = contract.unique_object_id_violations(
+        [tei_path.stem for tei_path in tei_files]
+    )
+    if id_problems:
+        print("ERROR: " + "; ".join(id_problems), file=sys.stderr)
         sys.exit(1)
 
     _remove_stale_tei_assets({tei_path.name for tei_path in tei_files})
@@ -407,83 +563,117 @@ def build_all(force: bool) -> list[str]:
     project_name = _extract_project_name(project_md)
 
     catalog_objects: list[dict] = []
-    failed: list[str] = []
+    errors: list[dict] = []
     published_tei_names: set[str] = set()
+    input_state_timestamps: list[str] = []
 
     for tei_path in tei_files:
         dst = DOCS_DATA_DIR / f"{tei_path.stem}.json"
-        if dst.exists() and not force:
-            print(f"  SKIP {tei_path.stem} (exists, use --force)")
-            if not _is_well_formed_tei(tei_path):
-                failed.append(tei_path.stem)
-                continue
-            try:
-                existing = json.loads(dst.read_text(encoding="utf-8"))
-                if not isinstance(existing, dict):
-                    raise TypeError("expected a JSON object")
-                catalog_item = {
-                    "id": existing["id"],
-                    "title": existing.get("title", ""),
-                    "date": existing.get("date", ""),
-                    "language": existing.get("language", ""),
-                    "page_count": len(existing.get("pages", [])),
-                    "has_images": existing.get("has_images", False),
-                }
-            except (json.JSONDecodeError, KeyError, OSError, TypeError) as exc:
-                print(f"  FAIL {tei_path.stem} (existing frontend data: {exc})")
-                failed.append(tei_path.stem)
-                continue
-            catalog_objects.append(catalog_item)
-            _publish_tei_asset(tei_path)
-            published_tei_names.add(tei_path.name)
-            continue
-
         data = process_tei(tei_path)
         if data is None:
-            failed.append(tei_path.stem)
+            errors.append(
+                {
+                    "object_id": tei_path.stem,
+                    "error": "TEI could not be parsed or its facsimile contract failed",
+                    "stage": "read",
+                }
+            )
             continue
 
-        _publish_tei_asset(tei_path)
+        existing = None
+        if dst.exists() and not force:
+            try:
+                existing = json.loads(dst.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                print(f"  REBUILD {tei_path.stem} (invalid existing frontend data)")
+        try:
+            _publish_tei_asset(tei_path)
+            if existing != data:
+                write_json_atomic(dst, data)
+        except OSError as exc:
+            errors.append(
+                {
+                    "object_id": tei_path.stem,
+                    "error": str(exc),
+                    "stage": "publish",
+                }
+            )
+            continue
         published_tei_names.add(tei_path.name)
+        timestamp = data.get("_meta", {}).get("input_state_timestamp", "")
+        if timestamp:
+            input_state_timestamps.append(timestamp)
 
-        # Write per-object JSON
-        dst.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  OK   {data['id']} ({len(data['pages'])} pages, images={'yes' if data['has_images'] else 'no'})")
+        action = "SKIP" if existing == data else "OK  "
+        print(
+            f"  {action} {data['id']} ({len(data['pages'])} pages, "
+            f"images={'yes' if data['has_images'] else 'no'})"
+        )
 
-        catalog_objects.append({
-            "id": data["id"],
-            "title": data["title"],
-            "date": data["date"],
-            "language": data["language"],
-            "page_count": len(data["pages"]),
-            "has_images": data["has_images"],
-        })
+        catalog_objects.append(
+            {
+                "id": data["id"],
+                "title": data["title"],
+                "date": data["date"],
+                "language": data["language"],
+                "signature": data["signature"],
+                "status": data["status"],
+                "page_count": len(data["pages"]),
+                "has_images": data["has_images"],
+            }
+        )
 
     _remove_stale_tei_assets(published_tei_names)
+    _remove_stale_frontend_assets({Path(name).stem for name in published_tei_names})
 
     # Write catalog
+    source_digest = hashlib.sha256()
+    source_digest.update(project_name.encode("utf-8"))
+    for tei_path in tei_files:
+        try:
+            source_bytes = tei_path.read_bytes()
+        except OSError as exc:
+            if not any(error["object_id"] == tei_path.stem for error in errors):
+                errors.append(
+                    {
+                        "object_id": tei_path.stem,
+                        "error": str(exc),
+                        "stage": "read",
+                    }
+                )
+            continue
+        source_digest.update(tei_path.name.encode("utf-8"))
+        source_digest.update(source_bytes)
     catalog = {
+        "_meta": {
+            "script": "06_build_frontend.py",
+            "source_hash": source_digest.hexdigest()[:12],
+            "input_state_timestamp": max(input_state_timestamps, default=""),
+        },
         "project": project_name,
-        "generated": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "source_hash": source_digest.hexdigest()[:12],
         "objects": catalog_objects,
     }
     catalog_path = DOCS_DATA_DIR / "catalog.json"
-    catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_json_atomic(catalog_path, catalog)
     print(f"\nCatalog written to {catalog_path} ({len(catalog_objects)} objects)")
-    return failed
+    return errors
 
 
 # ---------------------------------------------------------------------------
 # Local dev server
 # ---------------------------------------------------------------------------
 
-def serve(port: int = 8080):
+
+def serve(port: int = 8080) -> None:
     """Start a local HTTP server on the docs/ directory."""
     import functools
     import os
 
     os.chdir(str(DOCS_DIR))
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(DOCS_DIR))
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(DOCS_DIR)
+    )
     server = http.server.HTTPServer(("", port), handler)
     print(f"\nServing docs/ at http://localhost:{port}/  (Ctrl+C to stop)")
     try:
@@ -497,20 +687,31 @@ def serve(port: int = 8080):
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser(description="Build static frontend from TEI-XML files.")
-    parser.add_argument("--force", action="store_true", help="Regenerate all data files")
-    parser.add_argument("--serve", action="store_true", help="Start local HTTP server on port 8080")
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build static frontend from TEI-XML files."
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Regenerate all data files"
+    )
+    parser.add_argument(
+        "--serve", action="store_true", help="Start local HTTP server on port 8080"
+    )
     args = parser.parse_args()
 
     ensure_dirs()
-    failed = build_all(args.force)
+    errors = build_all(args.force)
+    write_errors(errors, DOCS_DATA_DIR)
 
     # A TEI file that could not be read leaves a hole in the published data,
     # so the run fails instead of serving an incomplete edition.
-    if failed:
-        print(f"\nERROR: {len(failed)} TEI file(s) could not be processed: "
-              f"{', '.join(failed)}", file=sys.stderr)
+    if errors:
+        failed_ids = ", ".join(error["object_id"] for error in errors)
+        print(
+            f"\nERROR: {len(errors)} TEI file(s) could not be processed: {failed_ids}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if args.serve:

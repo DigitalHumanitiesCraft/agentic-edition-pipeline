@@ -5,6 +5,7 @@ reporting, the clear failure when the configured schema file is absent, and
 the offline path from a transcription file through steps 4 and 5 to TEI that
 validates against the shipped default schema.
 """
+
 import json
 import shutil
 from pathlib import Path
@@ -57,24 +58,29 @@ def test_missing_schema_fails_with_pointer(tmp_path):
     assert "VALIDATION_SCHEMA" in str(exc.value)
 
 
-def test_offline_path_produces_tei_valid_against_the_default_schema(monkeypatch, tmp_path):
+def test_offline_path_produces_tei_valid_against_the_default_schema(
+    monkeypatch, tmp_path
+):
     """Fixture into data/processed/transcriptions/, then steps 4 and 5.
 
     This is the path a fork walks without any API key: a contract-conformant
     transcription file, deterministic validation, deterministic TEI. Its
     output has to validate against the schema the template ships as default.
     """
-    dirs = {name: tmp_path / name for name in
-            ("transcriptions", "validated", "tei", "results_tei", "reports")}
+    dirs = {
+        name: tmp_path / name
+        for name in ("transcriptions", "validated", "tei", "results_tei", "reports")
+    }
     for path in dirs.values():
         path.mkdir()
-    shutil.copyfile(FIXTURES / "transcription.json", dirs["transcriptions"] / "synthetic1.json")
+    shutil.copyfile(
+        FIXTURES / "transcription.json", dirs["transcriptions"] / "synthetic1.json"
+    )
 
     monkeypatch.setattr(step4, "TRANSCRIPTIONS_DIR", dirs["transcriptions"])
     monkeypatch.setattr(step4, "VALIDATED_DIR", dirs["validated"])
     assert step4.validate_one("synthetic1", use_llm=False, force=True) is None
 
-    monkeypatch.setattr(step5, "TRANSCRIPTIONS_DIR", dirs["transcriptions"])
     monkeypatch.setattr(step5, "VALIDATED_DIR", dirs["validated"])
     monkeypatch.setattr(step5, "TEI_DIR", dirs["tei"])
     monkeypatch.setattr(step5, "RESULTS_TEI_DIR", dirs["results_tei"])

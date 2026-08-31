@@ -234,6 +234,30 @@ def test_force_replaces_marked_quickstart_target(
     assert runner._has_valid_ownership_marker(target)
 
 
+def test_clean_removes_only_a_runner_owned_target(tmp_path: Path) -> None:
+    target = tmp_path / "owned"
+    target.mkdir()
+    runner._write_ownership_marker(target)
+    (target / "generated.txt").write_text("generated", encoding="utf-8")
+
+    assert runner.clean(target) is True
+
+    assert not target.exists()
+    assert runner.clean(target) is False
+
+
+def test_clean_preserves_an_unowned_target(tmp_path: Path) -> None:
+    target = tmp_path / "foreign"
+    target.mkdir()
+    protected = target / "keep.txt"
+    protected.write_text("foreign", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-empty unowned target"):
+        runner.clean(target)
+
+    assert protected.read_text(encoding="utf-8") == "foreign"
+
+
 def test_force_rejects_canonical_default_without_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

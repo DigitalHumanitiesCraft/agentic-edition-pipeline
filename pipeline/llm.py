@@ -3,6 +3,7 @@
 Uses raw HTTP via requests instead of provider SDKs to minimize dependencies.
 Adapted from co-ocr-htr llm.js provider patterns and szd-htr retry logic.
 """
+
 from __future__ import annotations
 
 import base64
@@ -78,7 +79,9 @@ def call_llm(
     elif provider == "ollama":
         return _call_ollama(model, prompt, images, temperature)
     else:
-        raise ValueError(f"Unknown provider '{provider}'. Use gemini, openai, anthropic, or ollama.")
+        raise ValueError(
+            f"Unknown provider '{provider}'. Use gemini, openai, anthropic, or ollama."
+        )
 
 
 def parse_json_response(text: str) -> dict | list | None:
@@ -113,7 +116,10 @@ def parse_json_response(text: str) -> dict | list | None:
 
 # --- Provider implementations ---
 
-def _call_gemini(model: str, prompt: str, images: list[Path] | None, temperature: float) -> str:
+
+def _call_gemini(
+    model: str, prompt: str, images: list[Path] | None, temperature: float
+) -> str:
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not set. Add it to .env")
 
@@ -133,7 +139,9 @@ def _call_gemini(model: str, prompt: str, images: list[Path] | None, temperature
         "generationConfig": {"temperature": temperature},
     }
 
-    resp = _request_with_retry("POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT)
+    resp = _request_with_retry(
+        "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
+    )
     data = resp.json()
 
     if "candidates" not in data or not data["candidates"]:
@@ -141,7 +149,9 @@ def _call_gemini(model: str, prompt: str, images: list[Path] | None, temperature
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def _call_openai(model: str, prompt: str, images: list[Path] | None, temperature: float) -> str:
+def _call_openai(
+    model: str, prompt: str, images: list[Path] | None, temperature: float
+) -> str:
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY is not set. Add it to .env")
 
@@ -152,10 +162,12 @@ def _call_openai(model: str, prompt: str, images: list[Path] | None, temperature
     if images:
         for img_path in images:
             b64, mime = encode_image(img_path)
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                }
+            )
 
     body = {
         "model": model,
@@ -163,7 +175,9 @@ def _call_openai(model: str, prompt: str, images: list[Path] | None, temperature
         "temperature": temperature,
     }
 
-    resp = _request_with_retry("POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT)
+    resp = _request_with_retry(
+        "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
+    )
     data = resp.json()
 
     if "choices" not in data or not data["choices"]:
@@ -171,7 +185,9 @@ def _call_openai(model: str, prompt: str, images: list[Path] | None, temperature
     return data["choices"][0]["message"]["content"]
 
 
-def _call_anthropic(model: str, prompt: str, images: list[Path] | None, temperature: float) -> str:
+def _call_anthropic(
+    model: str, prompt: str, images: list[Path] | None, temperature: float
+) -> str:
     if not ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY is not set. Add it to .env")
 
@@ -186,10 +202,12 @@ def _call_anthropic(model: str, prompt: str, images: list[Path] | None, temperat
     if images:
         for img_path in images:
             b64, mime = encode_image(img_path)
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": mime, "data": b64},
-            })
+            content.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": mime, "data": b64},
+                }
+            )
     content.append({"type": "text", "text": prompt})
 
     body = {
@@ -199,7 +217,9 @@ def _call_anthropic(model: str, prompt: str, images: list[Path] | None, temperat
         "temperature": temperature,
     }
 
-    resp = _request_with_retry("POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT)
+    resp = _request_with_retry(
+        "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
+    )
     data = resp.json()
 
     if "content" not in data or not data["content"]:
@@ -207,7 +227,9 @@ def _call_anthropic(model: str, prompt: str, images: list[Path] | None, temperat
     return data["content"][0]["text"]
 
 
-def _call_ollama(model: str, prompt: str, images: list[Path] | None, temperature: float) -> str:
+def _call_ollama(
+    model: str, prompt: str, images: list[Path] | None, temperature: float
+) -> str:
     url = f"{OLLAMA_BASE_URL}/api/generate"
 
     image_list = []
@@ -240,8 +262,10 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
         try:
             resp = requests.request(method, url, **kwargs)
             if resp.status_code == 429 and attempt < MAX_RETRIES:
-                wait = BACKOFF_BASE * (2 ** attempt)
-                print(f"  Rate limited. Waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                wait = BACKOFF_BASE * (2**attempt)
+                print(
+                    f"  Rate limited. Waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})"
+                )
                 time.sleep(wait)
                 continue
             try:
@@ -253,8 +277,10 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
             return resp
         except requests.exceptions.Timeout:
             if attempt < MAX_RETRIES:
-                wait = BACKOFF_BASE * (2 ** attempt)
-                print(f"  Timeout. Retrying in {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                wait = BACKOFF_BASE * (2**attempt)
+                print(
+                    f"  Timeout. Retrying in {wait}s (attempt {attempt + 1}/{MAX_RETRIES})"
+                )
                 time.sleep(wait)
                 continue
             raise

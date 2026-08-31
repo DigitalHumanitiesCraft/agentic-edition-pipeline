@@ -1,6 +1,6 @@
 # Transcription Prompt Template
 
-This prompt operates in four layers. Layer 1 is the system prompt sent directly to the vision model. Layers 2 through 4 are assembly instructions for Claude Code, which builds the final prompt at runtime.
+This prompt operates in four layers. `pipeline/03_transcribe.py` assembles them at runtime and records the layer list and combined prompt hash in the transcription metadata.
 
 ---
 
@@ -55,7 +55,7 @@ Confidence levels.
 
 ## Layer 2 — Document-Type Instructions
 
-Claude Code fills the placeholder `{document_type_instructions}` based on the corpus analysis in `knowledge/02_DATA.md` and the output of `pipeline/02_analyze.py`. The instructions should address layout conventions, expected structural elements, and transcription priorities specific to the document type.
+The source manifest selects a profile with `prompt_profile`. Step 3 loads `pipeline/prompts/profiles/{prompt_profile}.md` and appends it to the base prompt. The profile addresses layout conventions, expected structural elements, and transcription priorities specific to the material.
 
 The following categories from the szd-htr pipeline serve as reference examples. They are not hardcoded into this template. Each project defines its own categories based on its corpus.
 
@@ -69,13 +69,13 @@ The following categories from the szd-htr pipeline serve as reference examples. 
 - **Zeitungsausschnitt** — Newspaper clippings. Transcribe the article text. Note headline hierarchy, column breaks, and any handwritten annotations on the clipping.
 - **Korrespondenz** — Letters and correspondence. Note sender, recipient, date, and salutation structure. Transcribe envelope text separately if present.
 
-When assembling the prompt, Claude Code appends a paragraph after the system prompt describing the document type and its specific transcription priorities.
+The categories above are design references. A fork creates only the profile files supported by its corpus and benchmark.
 
 ---
 
 ## Layer 3 — Document Context
 
-Claude Code fills the following placeholders from the document metadata at runtime.
+Step 3 appends the available document metadata from `data/inventory.json` at runtime.
 
 ```
 This document has the following metadata.
@@ -93,8 +93,8 @@ The context block is appended after the document-type instructions so the model 
 
 ## Layer 4 — Per-Object Overrides
 
-For individual documents that require special handling, Claude Code checks for an override file at `prompts/objects/{object_id}.md`. If the file exists, its contents replace or supplement the document-type instructions from Layer 2.
+For individual documents that require special handling, step 3 checks for an override file at `pipeline/prompts/objects/{object_id}.md`. If the file exists, its contents supplement the document-type instructions from Layer 2.
 
 Override files are optional. They exist for edge cases such as documents in unusual scripts, documents with severe damage, or documents where a previous transcription attempt produced poor results and the prompt needs targeted adjustment.
 
-Claude Code logs when an override file is applied, recording the object ID and override path in the session journal.
+The applied override path appears in `_meta.prompt_layers`. The combined `_meta.prompt_hash` binds the model output to the exact assembled prompt.

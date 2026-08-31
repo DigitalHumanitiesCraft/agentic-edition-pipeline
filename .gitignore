@@ -16,12 +16,13 @@ __pycache__/
 # not its contents. To version files below an ignored tree you need a
 # recursive negation for the contents, e.g.:
 #   !data/sources/text/*.json    # check in a small transcription fixture set
-#   !results/tei/**              # check in the publication-ready TEI
+#   !results/tei/**              # check in TEI candidates for project gates
 #   !docs/data/**                # check in the generated frontend data
 # Keep re-obtainable data (remote facsimiles, bulk scans) ignored.
 data/processed/**
 !data/processed/.gitkeep
 data/sources/**
+!data/sources/manifest.json
 !data/sources/pdf/
 !data/sources/images/
 !data/sources/text/
@@ -30,6 +31,7 @@ data/sources/**
 # Results (generated)
 results/**
 !results/tei/
+!results/tei/**
 !results/reports/
 !results/*/.gitkeep
 
@@ -40,9 +42,8 @@ docs/data/**
 # Isolated output of the synthetic offline quickstart
 .aep-quickstart/
 
-# Facsimiles copied into docs/ by step 6 are needed for GitHub Pages
-# (deploy from branch serves committed files only), so docs/images/ is
-# deliberately NOT ignored.
+# Facsimiles copied into docs/ by step 6 are publication assets, so
+# docs/images/ is deliberately not ignored.
 
 # IDE and OS
 .vscode/

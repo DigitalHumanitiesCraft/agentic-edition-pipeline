@@ -4,6 +4,7 @@ An API key must never reach a URL, an error string, or a file on disk. These
 checks pin down the Gemini header transport and the redaction helper that
 every error path in llm.py routes through.
 """
+
 import pytest
 import requests
 
@@ -36,7 +37,9 @@ def test_gemini_sends_the_key_as_header_not_query(monkeypatch):
     def fake_request(method, url, **kwargs):
         captured["url"] = url
         captured["headers"] = kwargs.get("headers", {})
-        return _FakeResponse(payload={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+        return _FakeResponse(
+            payload={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+        )
 
     monkeypatch.setattr(llm, "GEMINI_API_KEY", SECRET)
     monkeypatch.setattr(llm, "_request_with_retry", fake_request)
@@ -69,7 +72,9 @@ def test_http_error_from_provider_is_reraised_without_the_key(monkeypatch):
         f"401 Client Error for url: https://host/m:generateContent?key={SECRET}"
     )
     monkeypatch.setattr(
-        llm.requests, "request", lambda *a, **k: _FakeResponse(status_code=401, error=error)
+        llm.requests,
+        "request",
+        lambda *a, **k: _FakeResponse(status_code=401, error=error),
     )
 
     with pytest.raises(RuntimeError) as exc:

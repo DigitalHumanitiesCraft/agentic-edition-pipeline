@@ -22,8 +22,11 @@ Die Lesereihenfolge ergibt sich aus dieser Tabelle und der Schritt-Tabelle darun
 | [[04_TEI_MAPPING]] | Quellstruktur zu TEI-Element-Zuordnung | Mensch | TEI-Annotation |
 | [[05_DESIGN]] | Epics, User Stories, UI-Komponenten, Wireframes | Claude Code + Mensch | Frontend-Design |
 | [[08_DATA_CONTRACT]] | Datenvertrag der Transkriptions-JSON (Schritt 3 bis 6) | Template (fix) | Transkription bis Frontend |
+| [[lineage]] | Herkunft des Templates, Wiederverwendungsformen und Synchronisationsgrenzen | Template-Maintainer | Orientierung, Forks, Integration |
+| [[case-comparison]] | Vergleich der drei Editionsfälle und Anforderungen an den gemeinsamen Kern | Template-Maintainer | Architektur, Integration, Weiterentwicklung |
 | [[decisions]] | Architekturentscheidungen (ADR-Format) | Claude Code | Fortlaufend |
 | [[journal]] | Entwicklungsjournal pro Session | Claude Code | Fortlaufend |
+| [[handoff]] | Offene empfangene Deltas bis zur geprüften Integration | Claude Code | Wiedereinstieg, Übergabe |
 
 ## Lesereihenfolge nach Pipeline-Schritt
 
@@ -41,21 +44,17 @@ Die Lesereihenfolge ergibt sich aus dieser Tabelle und der Schritt-Tabelle darun
 
 Selbstbewertung gegen die [IDE-Kriterien fuer digitale Editionen v1.1](https://www.i-d-e.de/publikationen/weitereschriften/criteria-version-1-1).
 
-### Automatisch durch Template erfuellt
+### Technische Unterstuetzung der Vorlage
 
-- [x] 1.2 Bibliographische Identifikation (teiHeader/fileDesc)
-- [x] 1.5 Transparenz (knowledge/ offen im Repo, README, Lizenz)
-- [x] 3.7 Datenmodellierung (TEI DTABf, schemas/dtabf.json)
-- [x] 4.1 Technische Infrastruktur (Vanilla JS, GitHub Pages)
-- [x] 4.2 Interface und Usability (Katalog, Faksimile-Text-Ansicht)
-- [x] 4.3 Browsen (Katalog mit Inhaltsverzeichnis)
-- [x] 4.4 Suche (Client-seitige Volltextsuche)
-- [x] 4.5 Indizes (Personen-/Ortsregister aus TEI-Annotationen)
-- [x] 4.9 Technische Schnittstellen (TEI-XML Download)
-- [x] 4.11 Export-Formate (TEI-XML + Plaintext)
-- [x] 4.12 Zugang zu Basisdaten (TEI-XML in results/tei/)
-- [x] 4.13 Rechte und Lizenzen (CC-BY 4.0, konfigurierbar)
-- [x] 4.15 Dokumentation (knowledge/-System, README)
+Die Vorlage liefert Funktionen, aber keinen automatisch erfuellten IDE-Befund. Jeder Fork belegt die Kriterien mit seinem Korpus, seinem gewaehlten Schema, seinen Rechteangaben, seiner Oberflaeche und seiner fachlichen Abnahme.
+
+| Kriteriumsbereich | Vorhandene Unterstuetzung | Erforderlicher Projektbeleg |
+|---|---|---|
+| Bibliographische Identifikation | TEI-Header mit Dokumenttitel, Herausgeber, Institution, Signatur und Objekt-ID | Vollstaendigkeit und fachliche Richtigkeit der Metadaten |
+| Datenmodellierung | Deterministisches TEI und konfigurierbare RelaxNG-Pruefung; TEI All als technischer Ausgangspunkt | Editionsspezifisches Profil, Mapping und bestandene formale Pruefung |
+| Infrastruktur und Browsen | Statische Katalog- und Dokumentenansicht mit Filter | Usability, Barrierefreiheit und Eignung fuer die Zielgruppe |
+| Schnittstellen und Export | TEI-Download und Plaintext-Export | Dauerhafte Adressen, Zitierregeln und Archivierungsweg |
+| Rechte und Transparenz | Konfigurierbare Lizenzfelder und offene Projektdokumentation | Rechteklaerung fuer Texte, Bilder und Metadaten sowie Impressum/Kontakt |
 
 ### Vom Menschen auszufuellen
 
@@ -67,6 +66,10 @@ Selbstbewertung gegen die [IDE-Kriterien fuer digitale Editionen v1.1](https://w
 - [ ] 3.4 Methode → [[03_CONTEXT]] (Editorische Schule)
 - [ ] 3.5 Repraesentation von Dokumenten → [[03_CONTEXT]], [[04_TEI_MAPPING]]
 - [ ] 3.6 Textkritik und Indizierung → [[04_TEI_MAPPING]]
+- [ ] 4.5 Indizes → [[04_TEI_MAPPING]], [[05_DESIGN]] und projektspezifische Implementierung
 - [ ] 4.7 Metadaten und Verlinkung → [[04_TEI_MAPPING]] (Normdaten)
 - [ ] 4.8 Identifikation und Zitation → [[01_PROJECT]] (Persistente Identifier)
+- [ ] 4.9/4.11/4.12 Schnittstellen und Exporte → Downloads im gebauten Frontend pruefen
+- [ ] 4.13 Rechte und Lizenzen → Rechteklaerung fuer alle publizierten Bestandteile
+- [ ] 4.15 Dokumentation → Projektanleitung, Verantwortlichkeiten und Kontakt pruefen
 - [ ] 4.16 Langzeitnutzung → [[01_PROJECT]] (Archivierung)
