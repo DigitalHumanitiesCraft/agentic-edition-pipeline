@@ -33,3 +33,5 @@ uv run python -m http.server 8080 --directory .aep-quickstart/docs
 Open `http://localhost:8080/` in a browser. The generated `quickstart-report.json` records the object IDs, completed checks, explicit schema target, offline provider configuration, and ownership marker. The runner clears every supported API-key and provider variable before it starts the pipeline processes.
 
 The example proves the runnable deterministic path and its declared technical checks. It does not provide scholarly validation or acceptance of an edition.
+
+The isolated workspace also carries the shared `AGENTS.md`, harness entry file, setup guide, processing and evaluation references, and synthetic evaluation fixtures. An agent can inspect those instructions alongside the generated results. API credentials and research corpora are never copied. Use a full repository fork for a real edition; this disposable workspace has no Git history or publication workflow.

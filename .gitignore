@@ -21,6 +21,7 @@ __pycache__/
 # Keep re-obtainable data (remote facsimiles, bulk scans) ignored.
 data/processed/**
 !data/processed/.gitkeep
+data/review-proposals/**
 data/sources/**
 !data/sources/manifest.json
 !data/sources/pdf/

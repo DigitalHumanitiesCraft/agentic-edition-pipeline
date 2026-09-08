@@ -452,6 +452,11 @@ def page_violations(
         if not isinstance(page, dict):
             problems.append(f"pages[{index}] is not an object")
             continue
+        from review_state import edit_violations
+
+        problems.extend(
+            f"pages[{index}]: {problem}" for problem in edit_violations(page)
+        )
         number = page.get("page")
         if not isinstance(number, int) or isinstance(number, bool) or number < 1:
             problems.append(f"pages[{index}] has no page number from 1")
@@ -529,6 +534,13 @@ def response_violations(
     if expected_numbers is None and expected_pages is not None:
         expected_numbers = list(range(1, expected_pages + 1))
     problems = page_violations(pages, expected_numbers=expected_numbers)
+    for index, page in enumerate(pages):
+        if isinstance(page, dict) and any(
+            key in page for key in ("review", "edits", "transcription_raw")
+        ):
+            problems.append(
+                f"model pages[{index}] carries reserved review or raw-text fields"
+            )
     if expected_pages is not None and len(pages) != expected_pages:
         problems.append(
             f"model response carries {len(pages)} pages for {expected_pages} source images"

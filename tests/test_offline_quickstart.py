@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -19,6 +20,14 @@ from lxml import etree
 REPOSITORY_ROOT = Path(__file__).parent.parent
 RUNNER_PATH = REPOSITORY_ROOT / "examples" / "offline-quickstart" / "run.py"
 EXPECTED_IDS = ["example-letter-001", "example-note-002"]
+OPERATOR_DOCUMENTS = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "SETUP.md",
+    "reference/pipeline.md",
+    "reference/evaluation.md",
+)
 
 spec = importlib.util.spec_from_file_location("offline_quickstart", RUNNER_PATH)
 assert spec and spec.loader
@@ -81,6 +90,21 @@ def _http_get(server: ThreadingHTTPServer, path: str) -> bytes:
         return response.read()
 
 
+def _assert_operator_document_links(root: Path) -> None:
+    for name in OPERATOR_DOCUMENTS:
+        path = root / name
+        text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
+        for target in re.findall(r"\]\(([^\s)]+)\)", text):
+            if "://" in target or target.startswith("#"):
+                continue
+            linked = path.parent / target.split("#", 1)[0]
+            assert linked.exists(), f"{name} links to missing {target}"
+
+
+def test_operator_document_links_resolve_in_repository() -> None:
+    _assert_operator_document_links(REPOSITORY_ROOT)
+
+
 def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
     tmp_path: Path,
 ) -> None:
@@ -102,6 +126,14 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
     assert report["ownership_sentinel"] == runner.OWNERSHIP_SENTINEL
     assert all(report["checks"].values())
     assert runner._has_valid_ownership_marker(target)
+
+    for name in OPERATOR_DOCUMENTS:
+        assert (target / name).read_bytes() == (REPOSITORY_ROOT / name).read_bytes()
+    _assert_operator_document_links(target)
+    assert (target / "aep_eval" / "__main__.py").is_file()
+    assert (target / "tests" / "fixtures" / "evaluation" / "manifest.json").is_file()
+    assert (target / "examples" / "offline-quickstart" / "run.py").is_file()
+    assert not (target / ".env").exists()
 
     catalog = json.loads(
         (target / "docs" / "data" / "catalog.json").read_text(encoding="utf-8")

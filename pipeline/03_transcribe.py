@@ -19,9 +19,11 @@ import json
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import contract
+from call_records import recording
 from config import (
     BATCH_DELAY,
     CHUNK_SIZE,
@@ -42,6 +44,7 @@ from config import (
     write_json_atomic,
 )
 from llm import call_llm, parse_json_response, redact_secrets
+from review_state import canonical_sha256
 
 INVENTORY_PATH = DATA_DIR / "inventory.json"
 PROMPT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -212,7 +215,31 @@ def transcribe_chunk(
             "prompt_hash": hashlib.sha256(full_prompt.encode("utf-8")).hexdigest()[:12],
         }
     ]
-    raw = call_llm(provider, model, full_prompt, images)
+
+    def execute(prompt: str, call: dict) -> str:
+        path = (
+            TRANSCRIPTIONS_DIR.parent
+            / "llm-calls"
+            / doc_id
+            / f"{uuid.uuid4().hex}.json"
+        )
+        call["record"] = path.relative_to(TRANSCRIPTIONS_DIR.parent).as_posix()
+        with recording(
+            path,
+            {
+                "provider": provider,
+                "model": model,
+                "temperature": 0.1,
+                "prompt": prompt,
+                "images": source_image_state(images),
+                **call,
+            },
+        ) as record:
+            answer = call_llm(provider, model, prompt, images)
+            record["answer"] = answer
+            return answer
+
+    raw = execute(full_prompt, calls[-1])
     result = parse_json_response(raw)
 
     if result is None:
@@ -228,7 +255,7 @@ def transcribe_chunk(
                 ],
             }
         )
-        raw = call_llm(provider, model, retry_prompt, images)
+        raw = execute(retry_prompt, calls[-1])
         result = parse_json_response(raw)
 
     return result, calls
@@ -472,13 +499,63 @@ def transcribe_document(
 
     print(f"  Processing {doc_id} ({len(images)} page(s)) ...", end="", flush=True)
 
+    def run_chunk(chunk_images: list[Path], index: int, start: int):
+        identity = {
+            "cache_version": 1,
+            "provider": provider,
+            "model": model,
+            "temperature": 0.1,
+            "prompt": system_prompt,
+            "metadata": source_metadata,
+            "images": source_image_state(chunk_images),
+            "object_id": doc_id,
+            "chunk": index,
+            "start": start,
+        }
+        path = (
+            TRANSCRIPTIONS_DIR.parent
+            / "chunk-cache"
+            / doc_id
+            / f"{canonical_sha256(identity)}.json"
+        )
+        expected = list(range(start, start + len(chunk_images)))
+        if path.exists() and not force:
+            cached = json.loads(path.read_bytes())
+            content = cached.get("content", {})
+            if (
+                cached.get("identity") != identity
+                or cached.get("sha256") != canonical_sha256(content)
+                or contract.response_violations(
+                    content.get("result"), expected_numbers=expected
+                )
+            ):
+                raise ValueError(
+                    "Invalid chunk cache; retain it and rerun with --force"
+                )
+            return content["result"], content["calls"]
+        result, calls = transcribe_chunk(
+            chunk_images, system_prompt, provider, model, doc_id, index, start
+        )
+        if source_image_state(chunk_images) != identity["images"]:
+            return result, calls
+        if not contract.response_violations(result, expected_numbers=expected):
+            content = {"result": result, "calls": calls}
+            write_json_atomic(
+                path,
+                {
+                    "_meta": provenance_meta(script="03_transcribe.py", step=3),
+                    "identity": identity,
+                    "content": content,
+                    "sha256": canonical_sha256(content),
+                },
+            )
+        return result, calls
+
     try:
         executed_prompts: list[dict] = []
         # Split into chunks if needed
         if len(images) <= chunk_size:
-            result, calls = transcribe_chunk(
-                images, system_prompt, provider, model, doc_id, 0, 1
-            )
+            result, calls = run_chunk(images, 0, 1)
             executed_prompts.extend(calls)
             if result is None:
                 return {
@@ -502,15 +579,7 @@ def transcribe_document(
             chunk_results: list[dict] = []
             for i in range(0, len(images), chunk_size):
                 chunk_imgs = images[i : i + chunk_size]
-                chunk_result, calls = transcribe_chunk(
-                    chunk_imgs,
-                    system_prompt,
-                    provider,
-                    model,
-                    doc_id,
-                    i // chunk_size,
-                    i + 1,
-                )
+                chunk_result, calls = run_chunk(chunk_imgs, i // chunk_size, i + 1)
                 executed_prompts.extend(calls)
                 if chunk_result is None:
                     return {

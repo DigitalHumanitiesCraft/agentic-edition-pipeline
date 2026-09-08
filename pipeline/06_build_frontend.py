@@ -337,6 +337,8 @@ def process_tei(tei_path: Path) -> dict | None:
     # file or a remote facsimile URL on at least one page.
     has_images = any(p.get("image") for p in pages)
 
+    from review_state import workflow
+
     return {
         "_meta": {
             "script": "06_build_frontend.py",
@@ -351,6 +353,7 @@ def process_tei(tei_path: Path) -> dict | None:
         "status": meta.get("status", ""),
         "pages": pages,
         "has_images": has_images,
+        "workflow": workflow(root),
     }
 
 

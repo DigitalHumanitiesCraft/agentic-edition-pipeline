@@ -6,39 +6,47 @@ tags: [index, navigation]
 
 # Wissensindex
 
-Einstiegspunkt fuer Claude Code und Menschen. Dieses Verzeichnis ist die Promptotyping-Wissensbasis des Editionsprojekts. Claude Code liest zuerst dieses Dokument, dann die fuer den aktuellen Arbeitsschritt relevanten Dokumente.
+Einstiegspunkt für Agenten und Editionsteam. Der gemeinsame Arbeitsvertrag steht in [AGENTS.md](../AGENTS.md). Dieses Verzeichnis hält Projektentscheidungen und Verarbeitungsverträge für die Arbeit in einem AI-Harness bereit. Gelesen werden die für die aktuelle Aufgabe relevanten Dokumente.
 
-Wenn die Dokumente 01–04 noch ungefuellte `[TODO]`-Felder enthalten, ist das Repository noch nicht fuer ein konkretes Editionsprojekt instantiiert. In diesem Fall `SETUP.md` im Projektstamm lesen und mit dem Menschen gemeinsam die Konfigurationspunkte abarbeiten, bevor Pipeline-Skripte ausgefuehrt werden.
+Wenn die Dokumente 01–04 noch ungefuellte `[TODO]`-Felder enthalten, ist das Repository noch nicht fuer ein konkretes Editionsprojekt instantiiert. Vor der Verarbeitung eines realen Korpus ist `SETUP.md` durchzuarbeiten. Explizit beauftragte Template-Wartung richtet sich nach [[project]] und [[specification]] und verwendet isolierte synthetische Tests. Die Editionsplatzhalter bleiben dabei offen.
 
 ## Dokumente
 
-Die Lesereihenfolge ergibt sich aus dieser Tabelle und der Schritt-Tabelle darunter, nicht aus Dateipraefixen. `decisions.md` und `journal.md` tragen die Konventionsnamen der Promptotyping-Dokumente.
+Die Lesereihenfolge richtet sich nach der Aufgabe und ihren Abhängigkeiten. Dateipräfixe identifizieren die vorhandenen Konfigurationsdokumente. `decisions.md` und `journal.md` halten Entscheidungen und geprüfte Arbeitsergebnisse fest.
 
 | Dokument | Inhalt | Wer fuellt aus | Wann relevant |
 |---|---|---|---|
+| [[project]] | Zweck, Wiederverwendung und Grenzen des Templates | Template-Maintainer | Wartung |
+| [[specification]] | Anforderungen an 0.10.0 | Template-Maintainer | Implementierung und Prüfung |
+| [[local-review]] | Lokaler Editor, API, Änderungen, Wiederherstellung | Template-Maintainer | Korrekturworkflow |
+| [[provider-records]] | Aufrufprotokolle und Wiederaufnahme | Template-Maintainer | Transkription |
 | [[01_PROJECT]] | Projektdaten, Forschungsfrage, Editionstyp | Mensch | Projektstart, Frontend |
 | [[02_DATA]] | Quellentypen, Korpusumfang, Inventar | Mensch + Skript | Analyse, Transkription |
 | [[03_CONTEXT]] | Editionsrichtlinien, Transkriptionskonventionen | Mensch | Transkription, Validierung |
 | [[04_TEI_MAPPING]] | Quellstruktur zu TEI-Element-Zuordnung | Mensch | TEI-Annotation |
-| [[05_DESIGN]] | Epics, User Stories, UI-Komponenten, Wireframes | Claude Code + Mensch | Frontend-Design |
+| [[05_DESIGN]] | Prüfaufgaben, Komponenten und Abnahmekriterien | Agent + Editionsteam | Erstes Beispiel und laufende Verifikation |
 | [[08_DATA_CONTRACT]] | Datenvertrag der Transkriptions-JSON (Schritt 3 bis 6) | Template (fix) | Transkription bis Frontend |
 | [[lineage]] | Herkunft des Templates, Wiederverwendungsformen und Synchronisationsgrenzen | Template-Maintainer | Orientierung, Forks, Integration |
 | [[case-comparison]] | Vergleich der drei Editionsfälle und Anforderungen an den gemeinsamen Kern | Template-Maintainer | Architektur, Integration, Weiterentwicklung |
-| [[decisions]] | Architekturentscheidungen (ADR-Format) | Claude Code | Fortlaufend |
-| [[journal]] | Entwicklungsjournal pro Session | Claude Code | Fortlaufend |
-| [[handoff]] | Offene empfangene Deltas bis zur geprüften Integration | Claude Code | Wiedereinstieg, Übergabe |
+| [[decisions]] | Architekturentscheidungen (ADR-Format) | Agent | Fortlaufend |
+| [[journal]] | Entwicklungsjournal pro Session | Agent | Fortlaufend |
+| [[handoff]] | Offene empfangene Deltas bis zur geprüften Integration | Agent | Wiedereinstieg, Übergabe |
 
-## Lesereihenfolge nach Pipeline-Schritt
+## Lesereihenfolge nach Aufgabe
 
 | Schritt | Dokumente |
 |---|---|
 | 01 Bildextraktion | [[02_DATA]] |
-| 02 Analyse | [[01_PROJECT]], [[02_DATA]] |
+| 02 Inventar | [[01_PROJECT]], [[02_DATA]] |
 | 03 Transkription | [[02_DATA]], [[03_CONTEXT]], [[08_DATA_CONTRACT]] |
-| 04 Validierung | [[03_CONTEXT]], [[08_DATA_CONTRACT]] |
-| 05 TEI-Annotation | [[03_CONTEXT]], [[04_TEI_MAPPING]], [[08_DATA_CONTRACT]] |
-| 05b Design | [[01_PROJECT]], [[03_CONTEXT]], [[04_TEI_MAPPING]], [[05_DESIGN]] |
+| 04 Qualitätsbewertung | [[03_CONTEXT]], [[08_DATA_CONTRACT]] |
+| 05 TEI-Erzeugung | [[03_CONTEXT]], [[04_TEI_MAPPING]], [[08_DATA_CONTRACT]] |
+| Begleitendes Design | [[01_PROJECT]], [[03_CONTEXT]], [[04_TEI_MAPPING]], [[05_DESIGN]] |
 | 06 Frontend | [[01_PROJECT]], [[05_DESIGN]], [[08_DATA_CONTRACT]] |
+
+[SETUP.md](../SETUP.md) beschreibt die Einrichtung und alternative Einstiege. Die [Verarbeitungsreferenz](../reference/pipeline.md) enthält Befehle und Abhängigkeiten. Die [Evaluationsreferenz](../reference/evaluation.md) unterscheidet technische Prüfungen, Quellenvergleich und fachliche Abnahme und nennt die Beobachtungsstellen des Videos.
+
+Historische Editionsfälle dienen der Herkunftsprüfung. Ihre Metadaten, Rechte und Konventionen werden nicht ungeprüft in einen neuen Fork übernommen.
 
 ## RIDE-Kriterien-Status
 

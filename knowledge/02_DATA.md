@@ -42,10 +42,26 @@ Jeder wiederholt auftretende Materialtyp erhaelt ein eigenes, evaluiertes Prompt
 
 [TODO: Aufloesung, Farbtiefe, Qualitaetsprobleme (verblasst, beschnitten, durchscheinend)?]
 
-Mindestanforderung fuer diplomatische Transkription: Aufloesung entsprechend etwa 300 DPI der Originalseite. Doppelseiten-Buchscans mit kleinem Satz reichen dafuer in der Regel nicht; solche Seiten werden in Schritt 3 als `page_type: gate_low_resolution` gegated statt transkribiert (siehe [[08_DATA_CONTRACT]]). Bei vorgelieferten Bildscans ist die Aufloesung an der Quelle sicherzustellen, `IMAGE_DPI` wirkt nur auf die PDF-Extraktion in Schritt 1.
+Die Eignung wird am tatsächlich übergebenen Bild geprüft, insbesondere bei kleiner Schrift und Doppelseiten. Eine nominelle DPI-Angabe allein bestätigt keine Lesbarkeit. `IMAGE_DPI` wirkt nur auf die PDF-Rasterisierung und kann fehlende Quelldetails nicht wiederherstellen. Der Transkriptionsvertrag erlaubt `page_type: gate_low_resolution` für unzureichende Bilder; die Zuverlässigkeit dieser Modellklassifikation ist am Korpus zu prüfen.
 
 ## Automatisches Inventar
 
 <!-- INVENTAR_START -->
 (wird von `pipeline/02_analyze.py` generiert)
 <!-- INVENTAR_END -->
+
+## Herkunft und Eingaberollen
+
+[TODO: Für jede Quellenart Herkunft, Zugriff, Rechte, Auswahl und Verarbeitung festhalten.]
+
+Katalogmetadaten können aus einer vorhandenen TEI-Datei stammen, während der Text neu aus Bildern erzeugt wird. Beide Herkunftswege sind einzeln zu dokumentieren. Eine bestehende Transkription kann als Eingabe oder als Vergleichsreferenz dienen. Ihre Rolle bestimmt, ob ein unabhängiger Erkennungsvergleich möglich ist.
+
+Das Manifest nimmt Objektmetadaten und Seitenfolgen auf. Detaillierte feldbezogene Herkunft und Quellenbelege sind im Projekt gesondert zu dokumentieren; das Template erzeugt sie nicht automatisch.
+
+## Auswahl eines Prüfbestands
+
+[TODO: Benannte Dokumente und Seiten mit Auswahlgrund, Materialtyp, Sprache, Layout und relevanten Schwierigkeiten festlegen.]
+
+Ein erster Lauf mit `--sample N` verarbeitet die ersten N Dokumente. Die Auswahl belegt keine Repräsentativität. Ein Prüfbestand soll die behauptete Anwendung abdecken und seine ausgeschlossenen Fälle nennen. Maßgeblich ist die [Evaluationsreferenz](../reference/evaluation.md).
+
+Die Übernahme einer technischen Methode überträgt keine Nutzungsrechte an Texten, Bildern oder Katalogdaten.

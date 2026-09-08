@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from lxml import etree
 
 import config
 import validate_schema
+from review_state import dependencies
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
 
@@ -17,6 +19,8 @@ def publication_problems(files: list[Path], schema: Path) -> list[str]:
     """Return publication blockers for the complete TEI candidate set."""
     if not files:
         return [f"no TEI candidates found in {config.RESULTS_TEI_DIR}"]
+    if (config.PROJECT_ROOT / "results/review-backups/pending.json").exists():
+        return ["interrupted review transaction must be recovered before publication"]
 
     results = validate_schema.validate_files(schema, files)
     problems = [
@@ -27,6 +31,24 @@ def publication_problems(files: list[Path], schema: Path) -> list[str]:
     for path, result in zip(files, results, strict=True):
         if not result.valid:
             continue
+        annotation = config.PROJECT_ROOT / "data/annotations" / f"{path.stem}.json"
+        if annotation.exists() or annotation.is_symlink():
+            canonical = (
+                config.PROJECT_ROOT
+                / "data/processed/transcriptions"
+                / f"{path.stem}.json"
+            )
+            try:
+                data = json.loads(canonical.read_bytes())
+                if any(
+                    item["status"] != "current"
+                    for item in dependencies(config.PROJECT_ROOT, path.stem, data)
+                ):
+                    problems.append(f"{path.name} has stale or unbound annotations")
+            except (OSError, ValueError):
+                problems.append(
+                    f"{path.name} annotation binding cannot be verified without canonical data"
+                )
         root = etree.parse(str(path)).getroot()
         revision = root.find(f".//{{{TEI_NS}}}revisionDesc")
         status = revision.get("status", "") if revision is not None else ""

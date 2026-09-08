@@ -74,3 +74,11 @@ DoCTA ist eine architektonische Übertragung. Eine gemeinsame Git-Abstammung von
 ## Aktuelle Evidenzgrenze
 
 Hersch und SZD belegen die fachliche und technische Ausgangsbasis der Verallgemeinerung. DoCTA belegt die Anwendung der Architektur in einem eigenständigen Projekt. Das künstliche Kurzbeispiel prüft den aktuellen regelbasierten Kern. Die Schuchardt-Instanz belegt einen Lauf an realem Material ab vorbereiteter Transkription. Ein vollständiger, durch einen externen Modelldienst gestützter Korpuslauf auf dem aktuellen Vorlagenstand mit fachlicher Prüfung und Nutzerabnahme ist noch nicht abgeschlossen.
+
+### Videodemos vom September 2026
+
+Die im [Video](https://youtu.be/krL-xMxTa_c) bearbeiteten lokalen Brief- und PDF-Instanzen sind zusätzliche technische Prüffälle. Die Briefdemo verbindet importierte Archivmetadaten mit einem eigenen Bildtranskriptionslauf und ist von der älteren Instanz mit 18 Briefen zu unterscheiden. Die PDF-Demo ergänzt separat erzeugte semantische Annotationen.
+
+Aus diesen Instanzen wurden Anforderungen an Korrekturen, Eingabekontext und Prüfung abgeleitet. Ihre Daten und projektspezifischen Funktionen werden nicht automatisch in die Vorlage übernommen. Die [Evaluationsreferenz](../reference/evaluation.md) nennt die beobachteten Stellen und ihre Aussagegrenzen. Die Videodemos begründen weder einen kontrollierten Modellbenchmark noch die fachliche Abnahme des aktuellen Templates.
+
+Die Forschungsgeschichte bleibt in diesem Dokument und [[case-comparison]] zugänglich. Das README und die Einrichtung einer neuen Edition verwenden eine projektunabhängige Beschreibung.

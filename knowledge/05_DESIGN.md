@@ -1,121 +1,71 @@
 ---
 title: Design und Nutzungsanforderungen
-description: Epics, User Stories und UI-Komponenten-Mapping. Bruecke zwischen Forschungsfrage und Frontend.
-tags: [design, ui, requirements, user-stories]
+description: Prüfaufgaben, vorhandene Komponenten und projektspezifische Abnahmekriterien
+tags: [design, ui, requirements]
 ---
 
 # Design und Nutzungsanforderungen
 
-Dieses Dokument leitet aus der Forschungsfrage, dem Editionstyp und den Annotationstypen die konkreten Nutzungsanforderungen und UI-Elemente der publizierten Edition ab. Claude Code fuellt es vor dem Frontend-Bau aus, der Mensch prueft und korrigiert.
+Dieses Dokument konkretisiert die Prüf- und Nutzungsaufgaben einer Edition. Agent und Editionsteam bearbeiten es am ersten Beispiel und bei neu beobachteten Fehlern. Der Frontend-Builder liest diese Anforderungen nicht automatisch; zusätzliche Funktionen erfordern Code und Tests.
 
-## Eingangsdokumente
+## Grundlagen
 
-Die Anforderungen werden aus drei Quellen abgeleitet:
+[[01_PROJECT]] beschreibt Forschungsfrage, Editionstyp und Zielgruppe. [[03_CONTEXT]] legt Editionskonventionen und Prüfverfahren fest. [[04_TEI_MAPPING]] bestimmt die darzustellenden Strukturen und Annotationen.
 
-- [[01_PROJECT]] Forschungsfrage, Editionstyp, Zielgruppe
-- [[03_CONTEXT]] Transkriptionskonventionen, Annotationstypen
-- [[04_TEI_MAPPING]] TEI-Elemente, Normdaten, Register
+## Aufgaben der Nutzenden
 
-## Epics
+Jede gewählte Aufgabe benötigt ein beobachtbares Abnahmekriterium. Umfangreiche Projekte können verwandte Aufgaben gruppieren. Eine feste Anzahl an Epics oder User Stories ist nicht erforderlich.
 
-Epics beschreiben die uebergeordneten Nutzungsziele der Edition. Sie ergeben sich direkt aus der Forschungsfrage und dem Editionstyp.
-
-[TODO: Claude Code leitet Epics aus 01_PROJECT.md ab. Beispiele:]
-
-### Epic 1: [TODO]
-
-**Abgeleitet aus:** [Forschungsfrage / Editionstyp]
-**Ziel:** [Was soll die Edition ermoeglichen?]
-
-### Epic 2: [TODO]
-
-**Abgeleitet aus:** [Forschungsfrage / Editionstyp]
-**Ziel:** [Was soll die Edition ermoeglichen?]
-
-## User Stories
-
-Jede User Story beschreibt ein konkretes Nutzungsszenario und wird einem Epic zugeordnet. Das Format folgt dem Standard: "Als [Rolle] will ich [Aktion], damit [Nutzen]."
-
-[TODO: Claude Code leitet User Stories aus Epics ab. Beispiele:]
-
-| ID | Epic | User Story | Prioritaet |
-|---|---|---|---|
-| US-01 | [Epic 1] | Als Forscher will ich ... damit ... | hoch |
-| US-02 | [Epic 1] | Als Leser will ich ... damit ... | mittel |
-| US-03 | [Epic 2] | Als Forscher will ich ... damit ... | hoch |
-
-## UI-Komponenten-Mapping
-
-Jede User Story wird auf konkrete UI-Elemente abgebildet. Das Mapping bestimmt, welche Komponenten das Frontend enthaelt.
-
-### Komponenten des Basisfrontends
-
-Diese Komponenten sind im aktuellen Basisfrontend technisch vorhanden. Der Fork prueft ihre Inhalte und entscheidet, welche weiteren Funktionen sein Editionsziel verlangt.
-
-| Komponente | Beschreibung | RIDE-Kriterium |
+| Aufgabe | Benötigte Information oder Handlung | Abnahmekriterium |
 |---|---|---|
-| Katalog | Filterbare Dokumentenliste mit Metadaten | 4.3 Browsen |
-| Review-Status | Sichtbarer zusammengefasster Seitenstatus im Katalog und Dokument | 1.5 Transparenz |
-| Dokumentenansicht | Seitenweise Textdarstellung mit optionalem Faksimile | 4.6 Darstellungsqualitaet |
-| TEI-Download | XML-Datei pro Dokument herunterladen | 4.9 Schnittstellen, 4.12 Basisdaten |
-| Plaintext-Export | Reiner Text ohne Markup | 4.11 Export-Formate |
+| [TODO] | [TODO] | [TODO] |
 
-### Forschungsspezifische Komponenten
+## Vorhandene Komponenten
 
-[TODO: Claude Code leitet aus den User Stories ab, welche zusaetzlichen Komponenten benoetigt werden.]
+Der Fork prüft die Inhalte und Eignung dieser technisch vorhandenen Funktionen an seinen eigenen Quellen.
 
-| Komponente | User Story | Beschreibung | Implementierungshinweis |
-|---|---|---|---|
-| [TODO] | US-01 | [TODO] | [TODO] |
-| Korpusweite Volltextsuche | [TODO] | Suchindex und Trefferanzeige, falls wissenschaftlich erforderlich | Eigene Datenprojektion und UI |
-| Zitierhinweis | [TODO] | Persistente Objektadresse und Zitationsschema | Projektmetadaten und UI |
-| Impressum und Kontakt | [TODO] | Verantwortlichkeit, Lizenz und Kontaktweg | Projektinhalt und UI |
+| Komponente | Vorhandener Umfang |
+|---|---|
+| Katalog | Filterbare Dokumentenliste mit Metadaten |
+| Dokumentenansicht | Seitenweiser Text mit optionalem Faksimile |
+| Review-Status | Getrennte Darstellung von Seitenstand und zusammengefasstem Dokumentstand |
+| TEI-Herkunft | Aus TEI abgeleitete Herkunft und gespeicherte Korrekturereignisse |
+| Downloads | TEI pro Dokument und Plaintext-Export |
+| Lokaler Korrektureditor | Aktueller Text, Rohtext, Versionsprüfung, Änderungsgrund und Verlauf |
+| Vorschläge | Getrennte Ablage und ausdrückliche Übernahme in den Korrekturweg |
 
-### Komponentenmatrix nach Editionstyp
+[[local-review]] definiert den lokalen Schreibweg. GitHub Pages liefert die statische Leseansicht. Ein Speichervorgang führt weder Commit noch Push oder fachliche Freigabe aus.
 
-Orientierung, welche UI-Elemente fuer welchen Editionstyp typisch sind:
+## Anforderungen aus der Videoprüfung
 
-| Komponente | Diplomatisch | Normalisiert | Kritisch |
-|---|---|---|---|
-| Faksimile-Text-Ansicht | ja (zentral) | optional | optional |
-| Zeilengetreue Darstellung | ja | nein | nein |
-| Normalisierungsanzeige | nein | ja (Original/Normalisiert umschalten) | nein |
-| Variantenapparat | nein | nein | ja (zentral) |
-| Textzeugen-Uebersicht | nein | nein | ja |
-| Personenregister | wenn annotiert | wenn annotiert | ja |
-| Ortsregister | wenn annotiert | wenn annotiert | ja |
-| Sachregister | wenn annotiert | wenn annotiert | wenn annotiert |
-| Konkordanz | wenn Forschungsfrage es erfordert | wenn Forschungsfrage es erfordert | wenn Forschungsfrage es erfordert |
-| Zeitleiste | wenn datierte Dokumente | wenn datierte Dokumente | wenn datierte Dokumente |
-| Faksimile-Viewer | ja | optional | optional |
+Die folgenden Funktionen sind noch umzusetzen, wenn der Fork sie benötigt. [[specification]] führt ihren Status für das Template.
 
-## Wireframes
-
-Textbasierte Wireframes der Hauptansichten. Claude Code erstellt sie basierend auf den ausgewaehlten Komponenten, der Mensch korrigiert.
-
-### Katalogansicht
-
-```
-[TODO: Wireframe nach Komponentenauswahl]
-```
-
-### Dokumentenansicht
-
-```
-[TODO: Wireframe nach Komponentenauswahl]
-```
-
-### Registeransicht
-
-```
-[TODO: Wireframe nach Komponentenauswahl]
-```
-
-## Abnahmekriterien
-
-Jede User Story hat messbare Abnahmekriterien, die vor der Freigabe des Frontends geprueft werden.
-
-| User Story | Abnahmekriterium | Erfuellt |
+| Prüfaufgabe | Anforderung | Prüffall |
 |---|---|---|
-| US-01 | [TODO] | [ ] |
-| US-02 | [TODO] | [ ] |
+| Schwierige Lesung beurteilen | Vergrößern und Verschieben des Faksimiles | Kleine Schrift bleibt lesbar und auf die richtige Seite bezogen |
+| Eigene Lesung unbeeinflusst festhalten | Bildansicht vor Freigabe des Modelltextes | Erstlesung wird vor dem Vergleich gespeichert |
+| Metadaten begründen | Feldherkunft und Sprung zum Quellenbeleg | Sprachangabe führt zu der tatsächlich mehrsprachigen Passage |
+| Frühere Notizen einordnen | Befund mit Eingabeversion und aktuellem Geltungsstatus | Alte Ziffernlesung wird nach einer Textkorrektur als prüfpflichtig gezeigt |
+| Entitäten prüfen | Erwähnung, Entität, Rolle und Normdatenbeleg getrennt anzeigen | Zwei Schreibweisen werden erst nach Prüfung derselben Identität zugeordnet |
+
+Eine gespeicherte Korrektur muss über Objekt, Seite und Änderungsgeschichte überprüfbar sein. Das Basisfrontend zeigt diese Daten bereits teilweise; eine zusätzliche direkte Anzeige des kanonischen Dateipfads und ein Metadaten-Belegsprung benötigen eigene Implementierung.
+
+## Weitere projektspezifische Komponenten
+
+[TODO: Komponenten aus den gewählten Forschungs- und Prüfaufgaben ableiten.]
+
+| Komponente | Voraussetzung | Abnahmekriterium |
+|---|---|---|
+| [TODO] | [TODO] | [TODO] |
+
+Ein kritischer Apparat setzt modellierte Textzeugen und Varianten voraus. Register benötigen geprüfte Entitätsdaten und eine eigene Datenprojektion. Eine korpusweite Volltextsuche benötigt einen Suchindex. Ein Zitierhinweis benötigt stabile Identifikatoren und die Zitierregel des Projekts.
+
+## Ansichten
+
+[TODO: Die tatsächlich benötigten Ansichten knapp skizzieren. Textbasierte Wireframes nur verwenden, wenn sie die Anordnung oder Interaktion klären.]
+
+## Abnahme
+
+[TODO: Die ausgewählten Aufgaben an benannten Dokumenten prüfen. Ergebnis, Datenstand und verbleibende fachliche Unsicherheit festhalten.]
+
+Technische Funktion, Lesbarkeit, Zugänglichkeit und fachliche Prüfung benötigen jeweils passende Belege. Eine vorhandene Komponente bestätigt noch keine gelungene Nutzung am konkreten Korpus.

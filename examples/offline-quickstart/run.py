@@ -206,10 +206,33 @@ def _prepare_target(target: Path, force: bool) -> None:
 def _copy_runtime(target: Path) -> None:
     """Create a minimal fork workspace from the checked-out repository."""
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
-    for name in ("pipeline", "schemas", "knowledge"):
+    for name in (
+        "pipeline",
+        "schemas",
+        "knowledge",
+        "reference",
+        "aep_eval",
+        "examples",
+    ):
         shutil.copytree(REPOSITORY_ROOT / name, target / name, ignore=ignore)
-    for name in ("pyproject.toml", "uv.lock", "LICENSE"):
+    for name in (
+        "pyproject.toml",
+        "uv.lock",
+        "LICENSE",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        "SETUP.md",
+        "CITATION.cff",
+        "codemeta.json",
+        ".env.example",
+    ):
         shutil.copy2(REPOSITORY_ROOT / name, target / name)
+    shutil.copytree(
+        REPOSITORY_ROOT / "tests" / "fixtures" / "evaluation",
+        target / "tests" / "fixtures" / "evaluation",
+        ignore=ignore,
+    )
 
     docs_target = target / "docs"
     shutil.copytree(REPOSITORY_ROOT / "docs" / "css", docs_target / "css")

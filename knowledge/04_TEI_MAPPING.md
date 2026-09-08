@@ -52,18 +52,15 @@ Weitere Strukturen werden hier spezifiziert und anschließend im deterministisch
 |---|---|---|
 | [TODO] | [TODO] | [TODO] |
 
-## Annotationsregeln
+## Gespeicherte Korrekturen
+
+Der Basispfad bildet `pages[].edits` als `revisionDesc/change[@type='transcription-correction']` ab. `@when` nennt den Zeitpunkt, `@subtype` die angegebene Rolle und `@who` verweist auf ein `respStmt` mit dem Bearbeiternamen. `@target` verweist auf die betroffene Seite. Der Änderungsgrund steht im Elementtext. Vorher-/Nachher-Werte bleiben im kanonischen JSON. Ungespeicherte Vorschläge erzeugen keine TEI-Ereignisse. Eine neue Ableitung und eine fachliche Freigabe behalten getrennte Bedeutungen.
+
+## Projektspezifische Annotationsregeln
 
 [TODO: Projektspezifische semantische Annotationen und ihre belegten Regeln definieren. Schritt 5 konsumiert diesen Abschnitt nicht automatisch. Der Fork implementiert die Regeln deterministisch oder als eigene dokumentierte und geprüfte Erweiterungsstufe.]
 
-Beispielformat:
-
-```
-- Personennamen mit <persName ref="GND-URI"> auszeichnen
-- Ortsnamen mit <placeName ref="Wikidata-URI"> auszeichnen
-- Datumsangaben mit <date when="YYYY-MM-DD"> auszeichnen
-- Werktitel mit <bibl> auszeichnen
-```
+Ein Formatbeispiel wie `<persName ref="GND-URI">` setzt eine geprüfte Identität und einen belegten Normdatenbezug voraus. Das Beispiel ist keine Anweisung zur automatischen Vergabe von Identifikatoren. Datumsnormalisierung und Werkidentifikation benötigen eigene Regeln.
 
 ## Register
 
@@ -73,3 +70,29 @@ Beispielformat:
 - [ ] Ortsregister (aus `placeName`)
 - [ ] Sachregister
 - [ ] Werkverzeichnis (aus `bibl`)
+
+## Modellierungsentscheidungen vor der Annotation
+
+[TODO: Inline- oder Stand-off-Modell, erlaubte Kategorien, Referenzen und Prüfregeln bestätigen.]
+
+Inline-Auszeichnung markiert eine Stelle im Textkörper. Stand-off-Auszeichnung führt die Annotation getrennt und bindet sie über explizite Verweise an Textstellen. Die Wahl richtet sich nach Überlappungen, Bearbeitung und den benötigten Ausgaben. Eine Agentenentscheidung erhält erst nach dokumentierter fachlicher Bestätigung den Status eines Projektprofils.
+
+Bei semantischen Annotationen sind unterschiedliche Aussagen zu prüfen:
+
+| Aussage | Erforderlicher Beleg |
+|---|---|
+| Erwähnung | Exakter Text und die richtige Fundstelle |
+| Entitätsidentität | Begründete Zusammenführung unterschiedlicher Namensformen |
+| Rolle | Belegte Funktion im jeweiligen Dokumentkontext |
+| Beziehung | Nachvollziehbare Verbindung zwischen den beteiligten Entitäten |
+| Normdatenlink | Passender externer Datensatz und dokumentierte Disambiguierung |
+
+Mehrere Bezeichnungen eines Werks können dieselbe Entität meinen. Dokumentlokale IDs erlauben keine Aussage über die Zahl verschiedener Personen oder Werke im Gesamtkorpus. Ein formal gültiger Anker bestätigt weder Identität noch Rolle.
+
+Tabellen, Spalten und typografische Gruppen können Beziehungen zwischen Personen, Werken und Funktionen tragen. Diese Layoutbeziehungen sind vor einer verlustbehafteten Linearisierung zu erfassen, wenn sie für das Editionsziel benötigt werden. Der Basisrenderer rekonstruiert sie nicht.
+
+## Reife einer TEI-Datei
+
+Ein erzeugtes TEI-Dokument ist zunächst ein Kandidat. Wohlgeformtheit, RelaxNG-Konformität und Textbewahrung sind technische Prüfungen. Als fachlich abgenommen gilt nur der entsprechend geprüfte und ausdrücklich bestätigte Stand. Die Benennung einer Datei oder eines Ordners als `final` bestätigt diese Reife nicht.
+
+Nach Textkorrekturen müssen Textanker und abhängige Befunde erneut geprüft werden. [[local-review]] beschreibt den Schutz angereicherter TEI im bestehenden Korrekturweg.

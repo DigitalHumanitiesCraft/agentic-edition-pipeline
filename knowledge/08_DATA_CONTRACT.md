@@ -6,7 +6,7 @@ tags: [data-contract, schema, pipeline]
 
 # Datenvertrag der Pipeline
 
-Ein einziger Datenvertrag verbindet die Schritte 3 (Transkription), 4 (Validierung), 5 (TEI-Annotation) und 6 (Frontend). Jede Transkriptionsdatei unter `data/processed/transcriptions/{object_id}.json` folgt diesem Schema, gleichgueltig ob sie vom Pipeline-Skript, von Hand oder agentisch erzeugt wurde. Schritt 4 reicht `metadata` und `pages` unveraendert durch, Schritt 5 liest beide aus der validierten Datei, Schritt 6 liest das generierte TEI.
+Ein einziger Datenvertrag verbindet die Schritte 3 (Transkription), 4 (Qualitätsbewertung), 5 (TEI-Erzeugung) und 6 (Frontend). Jede Transkriptionsdatei unter `data/processed/transcriptions/{object_id}.json` folgt diesem Schema, gleichgueltig ob sie vom Pipeline-Skript, von Hand oder agentisch erzeugt wurde. Schritt 4 reicht `metadata` und `pages` unveraendert durch, Schritt 5 liest beide aus der validierten Datei, Schritt 6 liest das generierte TEI.
 
 ## Schema
 
@@ -126,10 +126,24 @@ Schritt 3 verlangt genau einen Seiteneintrag pro uebergebenem Bild. Bei einer Ve
 
 ## Manuell oder agentisch erzeugte Transkriptionen
 
-Eine ausserhalb von Schritt 3 erzeugte strukturierte Transkription wird schemakonform direkt nach `data/processed/transcriptions/{object_id}.json` geschrieben; die Pipeline laeuft dann ab Schritt 4. Plaintext, PAGE XML und andere Austauschformate muessen zuvor durch eine projektspezifische Konvertierung in diesen Vertrag ueberfuehrt werden. Schritt 2 inventarisiert solche Dateien, fuehrt diese Umwandlung aber nicht aus. Schritt 3 bleibt der Vision-Provider-Pfad und bricht ohne API-Key mit einer klaren Fehlermeldung ab.
+Eine ausserhalb von Schritt 3 erzeugte strukturierte Transkription wird schemakonform direkt nach `data/processed/transcriptions/{object_id}.json` geschrieben; die Pipeline laeuft dann ab Schritt 4. Plaintext, PAGE XML und andere Austauschformate muessen zuvor durch eine projektspezifische Konvertierung in diesen Vertrag ueberfuehrt werden. Schritt 2 inventarisiert solche Dateien, fuehrt diese Umwandlung aber nicht aus. Schritt 3 bleibt der bildbasierte Providerpfad. Die Cloud-Adapter benötigen ihren konfigurierten API-Key; Ollama benötigt einen erreichbaren lokalen Dienst und ein kompatibles Modell.
 
 Fuer das Inventar (Schritt 2) koennen strukturierte Transkriptions-JSON zusaetzlich unter `data/sources/text/` liegen; `02_analyze.py` zaehlt ihre Seiten aus dem `pages`-Array (`source_type: transcription`).
 
-## Related
+## Erweiterungen in 0.10.0
+
+Der optionale Seitenblock `edits` dokumentiert jede gespeicherte Text- oder Notizkorrektur mit UUID, Akteur, Rolle, Zeitpunkt, Begründung und vollständigem Vorher-/Nachher-Wert. Die Folge muss lückenlos zum aktuellen Seitenstand führen. Modellantworten dürfen diese Ereignisse, Review-Entscheidungen oder Rohtextfelder nicht selbst liefern. Der lokale Dienst setzt korrigierte Seiten auf `in_review`; die Rolle `agent` begründet keine menschliche Prüfung. Der bestehende Freigabebefehl bleibt einer ausdrücklichen menschlichen Entscheidung vorbehalten. Einzelheiten stehen in [[local-review]].
+
+`_meta.executed_prompts[].record` kann auf ein privates Aufrufprotokoll relativ zu `data/processed/` verweisen. [[provider-records]] beschreibt Aufbewahrung und Wiederverwendung. Das statische Frontend übernimmt keine vollständigen Providerantworten oder Rohtranskripte.
+
+## Verwandte Dokumente
 
 [[00_INDEX]], [[02_DATA]] (Korpusbeschreibung), [[04_TEI_MAPPING]] (TEI-Abbildung), `pipeline/prompts/transcription.md` (Layer 1 erzwingt dieses Schema).
+
+## Andere Verfahren und Importprovenienz
+
+Externe OCR-/HTR-Systeme und andere ML-Verfahren können über einen expliziten Konverter in diesen Vertrag überführt werden. Der Konverter bewahrt Seitenfolge, Rohtext und tatsächliche Herkunft und prüft seine Ausgabe vor Schritt 4. Er darf keinen Lauf des mitgelieferten Transkriptionsskripts oder eines nicht verwendeten Modells behaupten.
+
+Layoutregionen, Entitäten und Beziehungen benötigen zusätzliche Verträge. Sie werden nicht durch das bloße Vorhandensein eines Textfelds übertragen. Das Template enthält keinen universellen Importer für alle Austauschformate.
+
+Das Feld `notes` ist im lokalen Korrekturweg bearbeitbar. Eine alte Modellnotiz besitzt keinen automatisch aktualisierten Geltungsstatus. Änderungen werden in `edits` nachvollziehbar; eine semantische Prüfung unveränderter Notizen bleibt offen. [[03_CONTEXT]] und [[local-review]] regeln den Umgang damit.

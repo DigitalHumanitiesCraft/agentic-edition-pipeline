@@ -15,6 +15,7 @@ from pathlib import Path
 
 import requests
 
+from call_records import response_data
 from config import (
     ANTHROPIC_API_KEY,
     GEMINI_API_KEY,
@@ -142,11 +143,19 @@ def _call_gemini(
     resp = _request_with_retry(
         "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
     )
-    data = resp.json()
+    data = response_data(resp)
 
     if "candidates" not in data or not data["candidates"]:
         raise RuntimeError(f"Gemini returned no candidates: {json.dumps(data)[:500]}")
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    parts = data["candidates"][0].get("content", {}).get("parts", [])
+    text = "".join(
+        part["text"]
+        for part in parts
+        if isinstance(part.get("text"), str) and not part.get("thought")
+    )
+    if not text:
+        raise RuntimeError("Gemini returned no answer text")
+    return text
 
 
 def _call_openai(
@@ -178,7 +187,7 @@ def _call_openai(
     resp = _request_with_retry(
         "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
     )
-    data = resp.json()
+    data = response_data(resp)
 
     if "choices" not in data or not data["choices"]:
         raise RuntimeError(f"OpenAI returned no choices: {json.dumps(data)[:500]}")
@@ -220,11 +229,18 @@ def _call_anthropic(
     resp = _request_with_retry(
         "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
     )
-    data = resp.json()
+    data = response_data(resp)
 
     if "content" not in data or not data["content"]:
         raise RuntimeError(f"Anthropic returned no content: {json.dumps(data)[:500]}")
-    return data["content"][0]["text"]
+    text = "".join(
+        part["text"]
+        for part in data["content"]
+        if part.get("type") == "text" and isinstance(part.get("text"), str)
+    )
+    if not text:
+        raise RuntimeError("Anthropic returned no answer text")
+    return text
 
 
 def _call_ollama(
@@ -249,7 +265,7 @@ def _call_ollama(
     body = {k: v for k, v in body.items() if v is not None}
 
     resp = _request_with_retry("POST", url, json=body, timeout=LOCAL_TIMEOUT)
-    data = resp.json()
+    data = response_data(resp)
 
     if "response" not in data:
         raise RuntimeError(f"Ollama returned no response: {json.dumps(data)[:500]}")

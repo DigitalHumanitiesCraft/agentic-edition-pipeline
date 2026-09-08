@@ -469,7 +469,9 @@ def generate_tei(object_id: str, data: dict, project: dict) -> str:
     if facsimile:
         parts.append(facsimile)
     parts += [body, "</TEI>", ""]
-    return "\n".join(parts)
+    from review_state import add_tei_edits
+
+    return add_tei_edits("\n".join(parts), pages)
 
 
 # ---------------------------------------------------------------------------

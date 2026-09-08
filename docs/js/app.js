@@ -1,5 +1,7 @@
 /* Agentic Edition Pipeline – Frontend (Vanilla JS)
    No dependencies. Hash-based routing. Works locally and on GitHub Pages. */
+import {canLeave, mountReview, unmountReview} from "./review-editor.js";
+
 (function () {
   "use strict";
 
@@ -9,6 +11,8 @@
   };
   var app = document.getElementById("app");
   var titleEl = document.getElementById("project-title");
+  let routeVersion = 0;
+  let currentHash = location.hash;
 
   // -- Utility --
   function debounce(fn, ms) {
@@ -44,10 +48,10 @@
     });
   }
   function loadObject(id) {
-    return fetch("data/" + id + ".json").then(function (r) {
+    return fetch("data/" + encodeURIComponent(id) + ".json", {cache: "no-store"}).then(function (r) {
       if (!r.ok) throw new Error(id + ".json not found (" + r.status + ")");
       return r.json();
-    }).then(function (d) { state.currentObject = d; state.currentPage = 0; });
+    });
   }
 
   // -- Router --
@@ -58,13 +62,19 @@
     return m ? { view: "viewer", id: decodeURIComponent(m[1]) } : { view: "catalog" };
   }
   function navigate() {
+    if (!canLeave()) { history.replaceState(null, "", currentHash || "#catalog"); return; }
+    unmountReview();
+    currentHash = location.hash;
+    const version = ++routeVersion;
     var route = getRoute();
     updateActiveNav(route.view);
     if (route.view === "catalog") { renderCatalog(); }
     else if (route.view === "viewer") {
       app.innerHTML = "<p>Lade&hellip;</p>";
-      loadObject(route.id).then(function () { renderViewer(route.id); })
-        .catch(function (e) { app.innerHTML = '<p class="catalog-empty">Fehler: ' + esc(e.message) + "</p>"; });
+      loadObject(route.id).then(function (object) {
+        if (version !== routeVersion) return;
+        state.currentObject = object; state.currentPage = 0; renderViewer(route.id);
+      }).catch(function (e) { if (version === routeVersion) app.innerHTML = '<p class="catalog-empty">Fehler: ' + esc(e.message) + "</p>"; });
     }
   }
   function updateActiveNav(view) {
@@ -135,7 +145,7 @@
       needs_review: "Automatische Pr&uuml;fung n&ouml;tig",
       problematic: "Automatischer Problembefund"
     };
-    return '<span class="badge badge-' + s.replace(/\s+/g, "_") + '">' +
+    return '<span class="badge badge-' + String(s).replace(/[^a-zA-Z0-9_-]/g, "_") + '">' +
       (labels[s] || esc(s)) + "</span>";
   }
   function filterCatalog(q) {
@@ -159,7 +169,7 @@
     if (has) {
       html += '<div class="viewer-panels">';
       html += '<div class="panel"><div class="panel-label">Faksimile</div><div class="panel-image" id="img-panel"></div></div>';
-      html += '<div class="panel"><div class="panel-label">Text</div><div class="panel-text" id="txt-panel"></div></div>';
+      html += '<div class="panel"><div class="panel-label">Text</div><div class="panel-text" id="txt-panel"></div><div id="review-panel"></div></div>';
       html += '</div><div class="page-nav">';
       html += '<button id="btn-prev" aria-label="Vorherige Seite">Zur&uuml;ck</button>';
       html += '<span class="page-counter" id="pg-count"></span>';
@@ -186,10 +196,25 @@
     ct.textContent = "Seite " + label + " (" + (state.currentPage + 1) + " von " + pages.length + ")";
     document.getElementById("btn-prev").disabled = state.currentPage === 0;
     document.getElementById("btn-next").disabled = state.currentPage >= pages.length - 1;
+    const reviewHost = document.getElementById("review-panel");
+    reviewHost.replaceChildren();
+    mountReview(reviewHost, state.currentObject, state.currentPage, async function (message) {
+      const pageIndex = state.currentPage;
+      const id = state.currentObject.id;
+      state.currentObject = await loadObject(id);
+      await loadCatalog();
+      state.currentPage = pageIndex;
+      renderViewer(id);
+      const notice = document.createElement("p");
+      notice.setAttribute("role", "status");
+      notice.textContent = message;
+      app.prepend(notice);
+    });
   }
   function navigatePage(delta) {
     var pages = state.currentObject.pages || [], n = state.currentPage + delta;
     if (n < 0 || n >= pages.length) return;
+    if (!canLeave()) return;
     state.currentPage = n; showPage();
   }
 

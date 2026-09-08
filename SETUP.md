@@ -1,75 +1,59 @@
-# SETUP.md — Instantiating the Agentic Edition Pipeline
+# Set up an edition
 
-This file guides you through adapting the template for your own edition project. Work through it top to bottom. Each section identifies a configuration point and tells you exactly which file to open and what to fill in. When done, delete or archive this file.
+Use this guide to configure a fork for its own sources and editorial requirements. Keep it available for later adaptations. An agent should first read [AGENTS.md](AGENTS.md).
 
-To verify the locked environment and deterministic pipeline before editing the template, run `uv run python examples/offline-quickstart/run.py`. The synthetic example needs no provider key, writes to `.aep-quickstart/`, and leaves the project knowledge and corpus directories unchanged. Its scope, preview command, and fail-closed replacement rules are documented in `examples/offline-quickstart/README.md`.
+For a software-only check, use the [offline quickstart](examples/offline-quickstart/README.md). It leaves the edition placeholders and corpus directories unchanged.
 
-Prerequisites are Python 3.11 or newer and [uv](https://docs.astral.sh/uv/). Install uv before the first command below; the repository then creates and locks its own Python environment.
+## Environment and access
 
----
+Create and clone your own copy of the repository. Install Python 3.11+ and [uv](https://docs.astral.sh/uv/), then run:
 
-## 1. Fork and clone
-
-1. Click **Use this template** (or fork) on GitHub to create your own copy.
-2. Clone your fork locally.
-3. Install Python dependencies.
-
-```
-uv sync --extra dev
+```console
+uv sync --locked --extra dev
 ```
 
-4. Copy the environment file and add your API keys.
+Open the repository in your AI harness and direct it to `AGENTS.md` if that file is not loaded automatically. The harness requires its own access configuration.
 
+When using a processing provider, copy `.env.example` to `.env` with your shell or file manager and configure the chosen adapter. In PowerShell:
+
+```powershell
+Copy-Item .env.example .env
 ```
-cp .env.example .env
-```
 
-Open `.env` in any text editor. At minimum, fill in one provider key for step 3 when the pipeline should transcribe images. Step 4 can run deterministically, and step 5 is always deterministic.
+Gemini, OpenAI and Anthropic need their configured API keys. Ollama uses a reachable local service and a compatible installed model. The deterministic workflow needs no provider key. Keep credentials out of Git and public assets.
 
-The transcription and optional LLM-validation paths check their key at startup and abort with `no API key configured, this step requires one` instead of producing empty or partial results. There is no key-less transcription mode; transcriptions produced outside step 3 enter the pipeline as contract-conformant JSON (see `knowledge/08_DATA_CONTRACT.md`).
+## Configure the edition
 
----
+The configuration files describe decisions for this corpus. New requirements can also need code changes. Writing a rule in Markdown alone does not implement it.
 
-## 2. Required configuration
-
-These are the points that every project must touch. Nothing else needs to change to get a working pipeline.
-
-### 2.1 Project identity — `knowledge/01_PROJECT.md`
-
-Fill in the markdown table at the top of the file. The `Projektname` row drives the frontend and project-level catalog title. Each TEI document title comes from object metadata and falls back to its object ID. The remaining fields support the project assessment in `knowledge/00_INDEX.md`.
-
-Fields that affect generated output:
-
-| Field | Where it appears |
+| File | Required decisions |
 |---|---|
-| Projektname | Frontend title and project-level catalog |
-| Herausgeber / Editor | TEI `titleStmt/editor` |
-| Institution | TEI `publicationStmt/publisher` |
-| Lizenz | TEI `publicationStmt/availability/licence` |
-| Sprachen | Project documentation; each TEI language comes from object metadata |
+| [01_PROJECT.md](knowledge/01_PROJECT.md) | Project identity, research question, edition type, responsible editors, publication terms |
+| [02_DATA.md](knowledge/02_DATA.md) | Source types, document boundaries, page order, completeness, provenance and rights |
+| [03_CONTEXT.md](knowledge/03_CONTEXT.md) | Transcription conventions, allowed model context, review procedure |
+| [04_TEI_MAPPING.md](knowledge/04_TEI_MAPPING.md) | Base and additional structures, annotation policy, chosen schema |
+| [05_DESIGN.md](knowledge/05_DESIGN.md) | Inspection tasks and testable interface requirements |
 
-The research question and edition type determine which UI components `knowledge/05_DESIGN.md` will contain. Fill them in before running step 5b (design).
+In `01_PROJECT.md`, preserve the table labels read by the scripts. `Projektname` supplies the catalog and frontend title. `Herausgeber / Editor`, `Institution` and `Lizenz` populate the TEI header. Document titles and languages come from object metadata. Check missing metadata explicitly; the current renderer has an object-ID title fallback and a German language fallback.
 
-### 2.2 Corpus description — `knowledge/02_DATA.md`
+Define the inspection interface with the first sample. Add components only where the edition needs them and verify their implementation against the requirements.
 
-Describe your source material: what types of documents exist (manuscript, typescript, printed text, mixed), where they are stored, and any known quality issues with the digitisations. The automated inventory block between `<!-- INVENTAR_START -->` and `<!-- INVENTAR_END -->` is filled in by `pipeline/02_analyze.py --update-knowledge`.
+## Select an input route
 
-Source material placement:
-
-| Source type | Put files in |
+| Available input | Placement and next operation |
 |---|---|
-| PDF files | `data/sources/pdf/` |
-| Image scans (JPEG, PNG, TIFF) | `data/sources/images/{doc_id}/` |
-| Existing transcriptions (plain text) | `data/sources/text/` for inventory; convert into the JSON data contract before step 4 |
-| Existing PAGE-XML | `data/sources/text/` for inventory; convert into the JSON data contract before step 4 |
-| Existing TEI | `data/sources/text/` as source and checked candidates in `results/tei/`; the supplied Pages gate requires schema conformance and `revisionDesc/@status="accepted"` |
-| Structured transcription JSON (data contract) | `data/sources/text/` for the inventory; contract-conformant copies in `data/processed/transcriptions/` for steps 4-6 |
+| PDFs | `data/sources/pdf/`; extract images, then inventory |
+| Ready page scans | `data/sources/images/{doc_id}/`; inventory directly |
+| Remote facsimiles | Declare ordered URLs in `data/sources/manifest.json`; inventory and materialize images |
+| Plain text or PAGE XML | Preserve under `data/sources/text/`; implement conversion to the transcription JSON contract |
+| Contract-conformant transcription JSON | Checked copies in `data/processed/transcriptions/`; assess quality |
+| Existing TEI | Preserve source under `data/sources/text/`; checked candidates in `results/tei/` can enter the frontend build |
 
-With ready-made image scans, step 1 is skipped entirely: all scripts resolve images through one shared root resolution (`data/sources/images/{doc_id}/` first, then `data/processed/images/{doc_id}/`), so supplied scans are consumed directly by steps 2, 3, and 6.
+The inventory does not convert text formats or TEI. Original sources remain distinguishable from generated results. Imported metadata, imported transcription and independent reference editions need separate provenance and declared roles.
 
-Structured transcription JSON must follow the pipeline data contract in `knowledge/08_DATA_CONTRACT.md` (`_meta`, `object_id`, and `pages` at the top level; page text and review state per page; object metadata under `metadata`). Step 2 counts source JSON pages from the `pages` array but does not convert plain text, PAGE XML, or TEI.
+### Optional source manifest
 
-Use `data/sources/manifest.json` when catalogue metadata or page images come from an external system. The committed file is empty. Add one record per document:
+The manifest uses version `0.1`. A document can declare its ID, material-specific prompt profile, metadata and consecutively numbered pages.
 
 ```json
 {
@@ -93,128 +77,73 @@ Use `data/sources/manifest.json` when catalogue metadata or page images come fro
 }
 ```
 
-Run `uv run python pipeline/02_analyze.py`, then `uv run python pipeline/fetch_facsimiles.py --all --from-manifest`. Step 2 merges the declared metadata with locally discovered files and rejects count differences between declared and materialized pages. The fetch utility records URL, filename, and SHA-256 for each page, uses bounded retries for transient server errors, and spaces requests according to `.env`. Step 3 verifies this materialization record before it calls a model.
+Within one document, every page must use the same remote or local source mode. Run the inventory and then `pipeline/fetch_facsimiles.py --all --from-manifest` for remote pages. The fetch record binds URLs to downloaded bytes. Count mismatches stop the affected operation.
 
-### 2.3 Transcription conventions — `knowledge/03_CONTEXT.md`
+The supplied transcription adapter reads locally materialized image bytes. Other harness tools may have different image-input mechanisms; verify that the model actually receives the image.
 
-Fill in the transcription convention table. The default conventions (uncertain readings as `[?]`, illegible passages as `[...]`, deletions as `~~text~~`, insertions as `{text}`) are already in the transcription prompt. Override them here if your project uses different markers or has special requirements (e.g. diplomatic conventions for a critical edition, special handling of stamps or marginalia).
+## Models and transcription instrument
 
-Also select which annotation types the TEI should carry, such as persons, places, organisations, dates, and bibliographic references. The selection becomes a requirement for the TEI mapping in step 2.4 and for any project-specific implementation.
+The harness model and processing models are independent. Configure the processing adapter in `.env`:
 
-### 2.4 TEI element mapping — `knowledge/04_TEI_MAPPING.md`
-
-Fill in the Annotationsregeln section with project-specific, testable rules:
-
-```
-- Personal names: <persName ref="GND-URI"> — use GND authority file
-- Place names: <placeName ref="Wikidata-URI"> — use Wikidata Q-identifier
-- Dates: <date when="YYYY-MM-DD"> — ISO 8601
-```
-
-The first body-mapping table records the structures implemented by the base renderer. Add project structures to the second table and implement them in the deterministic renderer or in a separate documented stage. Their presence in the knowledge document does not change the output by itself.
-
----
-
-## 3. LLM provider selection
-
-Configure in `.env`. The pipeline defaults to Gemini for transcription in step 3. Validation in step 4 may use a separate provider. Step 5 generates TEI deterministically and has no provider setting.
-
-| Provider | Key in .env | Default model |
+| Adapter value | Connection | Model selection |
 |---|---|---|
-| Google Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash` |
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
-| Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-4-5` |
-| Ollama (local) | `OLLAMA_BASE_URL` | model name in `*_MODEL` |
+| `gemini` | `GEMINI_API_KEY` | `TRANSCRIPTION_MODEL` |
+| `openai` | `OPENAI_API_KEY` | `TRANSCRIPTION_MODEL` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `TRANSCRIPTION_MODEL` |
+| `ollama` | `OLLAMA_BASE_URL` | Compatible installed model in `TRANSCRIPTION_MODEL` |
 
-To activate the LLM judge for validation in step 4, set its provider and model:
+Set `TRANSCRIPTION_PROVIDER` and an appropriate model identifier. Image transcription requires image support through that adapter. The checked-in default is a configuration starting point. Model suitability requires a project-specific test. Additional engines need an adapter or format converter with provenance and contract tests.
 
-```
-VALIDATION_PROVIDER=anthropic
-VALIDATION_MODEL=claude-haiku-4-5
-```
+Optional text-only model assessment uses `VALIDATION_PROVIDER` and `VALIDATION_MODEL`. Leaving the provider empty or passing `--no-llm` selects deterministic assessment. Base TEI generation has no provider setting.
 
-Leaving `VALIDATION_PROVIDER` empty keeps validation deterministic.
+The transcription prompt is assembled in this order:
 
----
+1. Base rules in `pipeline/prompts/transcription.md`.
+2. A selected material profile in `pipeline/prompts/profiles/{prompt_profile}.md`.
+3. Selected document metadata.
+4. An optional object instruction in `pipeline/prompts/objects/{doc_id}.md`.
 
-## 4. Processing parameters
+The executed layers and combined prompt hash are recorded. A declared profile must exist. Changing conventions also requires checking their JSON and TEI mappings.
 
-All tunable values live in `.env` and are read by `pipeline/config.py`.
+The supplied script includes selected metadata automatically. An image-only experiment requires a documented adaptation and a new prompt state. Keep prior edition text out of a supposed independent recognition run. Describe outputs as metadata-assisted where appropriate.
 
-| Variable | Default | When to change |
+Test the instrument on a fixed, varied sample. Record expected readings, unresolved cases and changes to instructions. Inspect the source images before authorizing a corpus-wide provider run. The first `N` documents selected by `--sample N` are not automatically representative.
+
+### Processing parameters
+
+Values are read through `pipeline/config.py` from `.env`.
+
+| Variable | Supplied default | Purpose |
 |---|---|---|
-| `BATCH_DELAY` | `2.0` | Reduce for fast APIs, increase if hitting rate limits |
-| `CHUNK_SIZE` | `20` | Lower for vision models with small context windows, raise for models that handle more images |
-| `IMAGE_DPI` | `150` | Raise to `300` for small print or fine handwriting; lower for large corpus to save disk space |
-| `FETCH_DELAY_SECONDS` | `0.5` | Increase when the image host requests a lower request rate |
-| `FETCH_MAX_RETRIES` | `3` | Bound retries for HTTP 429, server errors, and temporary connection failures |
-| `FETCH_BACKOFF_SECONDS` | `1.0` | Set the initial exponential retry delay |
+| `BATCH_DELAY` | `2.0` | Delay between documents |
+| `CHUNK_SIZE` | `20` | Maximum images grouped per transcription call |
+| `IMAGE_DPI` | `150` | PDF rasterization resolution |
+| `FETCH_DELAY_SECONDS` | `0.5` | Delay between remote-image requests |
+| `FETCH_MAX_RETRIES` | `3` | Retry bound for transient fetch failures |
+| `FETCH_BACKOFF_SECONDS` | `1.0` | Initial fetch retry delay |
 
-`IMAGE_DPI` only affects the PDF-to-image extraction in step 1. For ready-made image scans it has no effect; their resolution is fixed by the delivered digitisation and must be ensured at the source. As a minimum for diplomatic transcription, aim for the equivalent of 300 DPI of the original page (for a single octavo page roughly 2500 pixels on the long edge; more for fine print or small handwriting). Double-page book scans at low resolution are generally insufficient for faithful transcription of the running text; expect such pages to be gated as `page_type: gate_low_resolution` (see `knowledge/08_DATA_CONTRACT.md`) rather than transcribed.
+Adjust these to the selected service and sources. A higher rasterization DPI cannot recover detail absent from the original digitisation. Check small handwriting, print and double-page scans visually at the actual model input resolution.
 
----
+## TEI and schema
 
-## 5. Prompt customisation
+The base renderer covers metadata, page structure, paragraphs, line breaks and declared transcription markers. It preserves text in order under its stated whitespace normalization.
 
-The transcription and validation prompts in `pipeline/prompts/` are starting points. Every corpus requires adapting the transcription instrument to its source material. Adapt the prompt, run it on a fixed sample, evaluate the output against the originals, and record a new prompt state for every changed instruction. A production run requires a project-specific, evaluated prompt state.
+Specify additional structures before generating annotations. Decide whether entities are inline or stand-off, how mentions point to the text and how identities and relationships will be verified. Authority-file links require their own evidence. The base template does not resolve named entities or assign GND identifiers.
 
-Layer 1 (base rules) changes are typically needed when:
+Choose a schema using [schemas/README.md](schemas/README.md). TEI All is the runnable default. DTABf is a supplied stricter alternative that requires corresponding header and mapping changes. For an edition-specific profile, place the schema in `schemas/`, set `VALIDATION_SCHEMA` in `pipeline/config.py`, update `04_TEI_MAPPING.md` and record the decision.
 
-- Your source language or script is not covered by the base rules (e.g. Arabic script, East Asian languages, Kurrent).
-- Your edition type requires structural rules the default does not include (e.g. verse numbering, tabular ledger entries).
-- A pilot run showed a systematic error that a rule change would prevent.
+Run `pipeline/validate_schema.py` for RelaxNG validation. Structural validity does not establish transcription accuracy or scholarly acceptance.
 
-Project-specific transcription content enters through the runtime layers documented in `pipeline/prompts/transcription.md`. Step 3 now assembles these layers directly. Document any Layer 1 changes in `knowledge/decisions.md` with their rationale.
+## Inspect, correct and publish
 
-TEI generation follows a separate contract. Step 5 reads project metadata from `knowledge/01_PROJECT.md` and applies deterministic code. `knowledge/04_TEI_MAPPING.md` specifies project-specific structures and entities that a fork must implement in the renderer or in a separate documented stage. No TEI annotation prompt is assembled at runtime.
+The static frontend reads generated catalog and object JSON from TEI. The builder uses `01_PROJECT.md` for the project name. The agent uses `05_DESIGN.md` to implement additional interface requirements; the builder does not render arbitrary requirements from that document.
 
-Create one profile file at `pipeline/prompts/profiles/{prompt_profile}.md` for every material class selected in the source manifest. Profiles contain only the additional rules for that material. Examples include correspondence, account books, inventories, printed forms, or mixed bundles. A declared profile without a corresponding file fails the document at the prompt boundary.
+Use the [processing reference](reference/pipeline.md) for preview and local editor commands. The optional editor writes version-checked corrections, raw text and history into repository data. A save sets the page to `in_review`. It does not grant acceptance, commit changes or push to GitHub.
 
-Per-object prompt overrides for individual documents with special handling go in `pipeline/prompts/objects/{object_id}.md`. Step 3 appends the base rules, profile, metadata context, and object override in that order. `_meta.prompt_layers` and `_meta.prompt_hash` record the assembled instrument.
+Preserve original recognition notes and check whether they still describe the current text. A human correction becomes an evaluation reference only after its verification method and maturity are recorded.
 
-Operational note for agentic transcription: a vision model can only read an image that exists as a local file. Materialize remote facsimiles first (`pipeline/fetch_facsimiles.py`), then read the saved file; fetching a URL inside an agent tool returns bytes and metadata, not vision input.
+GitHub Pages serves read-only files. The supplied workflow requires schema conformance and accepted TEI, then rebuilds and deploys the static site on a push to `main`. Resolve source rights and approve the public contents before enabling publication. Keep private call records and recovery copies out of the site.
 
----
+## Check the chosen route before running it
 
-## 6. Schema adaptation
-
-The pipeline ships with two validation schemas, documented in detail in `schemas/README.md`.
-
-- `schemas/basisformat.rng` — official DTA-Basisformat RelaxNG schema (CC BY-SA 3.0 DE, Deutsches Textarchiv), used for full conformance validation of generated TEI before publication. For manuscript corpora, download the manuscript variant from https://www.deutschestextarchiv.de/basisformat_ms.rng instead.
-- `schemas/tei_all.rng` — runnable default target that accepts the base renderer output.
-
-Choosing the validation target is part of setting up a fork (ADR-005). The template defaults to TEI All so its base renderer has an executable gate. DTABf is a stricter supplied alternative for historical German-language texts and requires header adaptation. A project ODD/RNG supplies the final edition-specific contract. The options and their trade-offs are laid out in `schemas/README.md`.
-
-To set or change the target:
-
-1. Put your profile's RelaxNG schema into `schemas/` and point `VALIDATION_SCHEMA` in `pipeline/config.py` at it. Check conformance with `uv run python pipeline/validate_schema.py`.
-2. Update `knowledge/04_TEI_MAPPING.md` to match the new profile.
-3. Record the decision in `knowledge/decisions.md`.
-
----
-
-## 7. Frontend configuration
-
-The frontend in `docs/` is a static Vanilla JS application with no JavaScript build system. Its read-only facsimile-text view supports inspection and displays the human review status carried by the TEI.
-
-`pipeline/06_build_frontend.py` reads the project name from `knowledge/01_PROJECT.md` and writes it to `docs/data/catalog.json`. The client applies that value to the browser title and `<h1>`. The script also generates per-object data and synchronizes downloadable TEI into `docs/tei/`. Footer text remains hand-maintained in `docs/index.html`.
-
-To add research-specific UI components (e.g. a timeline, a concordance, a named-entity register), fill in `knowledge/05_DESIGN.md` before running step 6. Claude Code derives the component list from that document and implements only what is specified there.
-
-GitHub Pages: select **GitHub Actions** as the source. `.github/workflows/pages.yml` rebuilds the ignored JSON data layer from committed `results/tei/` and deploys `docs/` on every push to `main`.
-
----
-
-## 8. Verification checklist before first run
-
-- [ ] `.env` exists with at least one API key for the transcription provider
-- [ ] `knowledge/01_PROJECT.md` — project name and institution filled in
-- [ ] `knowledge/02_DATA.md` — source type selected and data placed in `data/sources/`
-- [ ] `knowledge/03_CONTEXT.md` — transcription conventions confirmed or customised
-- [ ] `knowledge/04_TEI_MAPPING.md` — annotation types and mapping rules filled in
-- [ ] `knowledge/05_DESIGN.md` — research question has been used to derive at least two epics (or left for Claude Code to derive at step 5b)
-- [ ] `data/sources/manifest.json` — external metadata, remote pages, and prompt profiles declared where needed
-- [ ] `pipeline/prompts/profiles/` — every selected prompt profile exists and has been evaluated on a fixed sample
-- [ ] Pilot test planned: first run `pipeline/02_analyze.py` and verify the inventory before triggering any LLM steps
-
-When all boxes are checked, open Claude Code in this directory. It reads `CLAUDE.md` first and will guide you through the pipeline step by step.
+Confirm source completeness, project conventions, input context, schema and the applicable review requirements. Check provider access only for components that need it. Verify inventory and a fixed sample before approving a paid corpus run. Use [evaluation guidance](reference/evaluation.md) to state what each test actually establishes.
