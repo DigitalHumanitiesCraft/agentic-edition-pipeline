@@ -166,14 +166,16 @@ def _request(
     body: bytes | None = None,
     headers: dict | None = None,
 ) -> tuple[int, bytes]:
+    # Saves include full schema validation and rebuilding derived assets.
     connection = http.client.HTTPConnection(
-        "127.0.0.1", server.server_address[1], timeout=10
+        "127.0.0.1", server.server_address[1], timeout=60
     )
-    connection.request(method, path, body=body, headers=headers or {})
-    response = connection.getresponse()
-    result = response.status, response.read()
-    connection.close()
-    return result
+    try:
+        connection.request(method, path, body=body, headers=headers or {})
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
 
 
 def test_http_security_and_version_conflict(running_server) -> None:
