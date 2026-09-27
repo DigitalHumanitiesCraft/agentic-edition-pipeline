@@ -1,15 +1,28 @@
-"""Record one explicit human review transition in canonical transcription JSON."""
+"""Record one explicit review transition in canonical transcription JSON.
+
+The CLI holds the same repository writer lock as the local review server and
+refuses to write while an interrupted review transaction awaits recovery,
+because recovery would restore the snapshot and silently drop the transition.
+"""
 
 from __future__ import annotations
 
 import argparse
 import copy
-import json
 import sys
 from datetime import UTC, datetime
 
 import contract
-from config import TRANSCRIPTIONS_DIR, write_json_atomic
+from config import (
+    PROJECT_ROOT,
+    TRANSCRIPTIONS_DIR,
+    configure_console,
+    read_json,
+    write_json_atomic,
+)
+from review_state import PENDING_MARKER, repository_writer
+
+ACTOR_KINDS = frozenset({"human", "agent"})
 
 
 def update_page_review(
@@ -19,15 +32,24 @@ def update_page_review(
     actor: str,
     note: str = "",
     timestamp: str | None = None,
+    actor_kind: str | None = None,
 ) -> dict:
-    """Return a copy with one auditable human review transition applied."""
+    """Return a copy with one auditable review transition applied.
+
+    actor_kind, when given, is recorded with the event; an agent can reopen
+    or return a page but cannot record human_verified or accepted.
+    """
     violations = contract.file_violations(data)
     if violations:
         raise ValueError("input violates the data contract: " + "; ".join(violations))
     if status not in contract.REVIEW_STATUSES:
         raise ValueError(f"unknown review status: {status}")
     if not actor.strip():
-        raise ValueError("actor must identify the human reviewer")
+        raise ValueError("actor must identify the reviewer")
+    if actor_kind is not None and actor_kind not in ACTOR_KINDS:
+        raise ValueError("actor_kind must be human or agent")
+    if actor_kind == "agent" and status in contract.HUMAN_DECISIONS:
+        raise ValueError(f"an agent cannot record the human decision {status}")
 
     updated = copy.deepcopy(data)
     page = next(
@@ -51,7 +73,9 @@ def update_page_review(
         "actor": actor.strip(),
         "timestamp": timestamp or datetime.now(UTC).isoformat(),
     }
-    if status in {"human_verified", "accepted"}:
+    if actor_kind is not None:
+        event["actor_kind"] = actor_kind
+    if status in contract.HUMAN_DECISIONS:
         event["page_state_hash"] = contract.review_page_state_hash(page)
     if note.strip():
         event["note"] = note.strip()
@@ -67,8 +91,9 @@ def update_page_review(
 
 
 def main() -> None:
+    configure_console()
     parser = argparse.ArgumentParser(
-        description="Record a human review transition on one transcription page."
+        description="Record a review transition on one transcription page."
     )
     parser.add_argument("--object", required=True, help="Object identifier")
     parser.add_argument("--page", required=True, type=int, help="Page number from 1")
@@ -76,9 +101,9 @@ def main() -> None:
         "--status",
         required=True,
         choices=sorted(contract.REVIEW_STATUSES),
-        help="New human review status",
+        help="New review status; human_verified and accepted are human decisions",
     )
-    parser.add_argument("--actor", required=True, help="Human reviewer identifier")
+    parser.add_argument("--actor", required=True, help="Reviewer identifier")
     parser.add_argument("--note", default="", help="Optional transition note")
     args = parser.parse_args()
 
@@ -87,22 +112,24 @@ def main() -> None:
         sys.exit(1)
     path = TRANSCRIPTIONS_DIR / f"{args.object}.json"
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        updated = update_page_review(
-            data,
-            args.page,
-            args.status,
-            args.actor,
-            args.note,
-        )
-        write_json_atomic(path, updated)
-    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        with repository_writer(PROJECT_ROOT):
+            if (PROJECT_ROOT / PENDING_MARKER).exists():
+                raise ValueError(
+                    "an interrupted review transaction is pending; run "
+                    "`uv run python pipeline/review_server.py --recover` first"
+                )
+            updated = update_page_review(
+                read_json(path), args.page, args.status, args.actor, args.note
+            )
+            write_json_atomic(path, updated)
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
 
     print(
         f"Updated {args.object} page {args.page}: {args.status}. "
-        "Re-run steps 4, 5, and 6 with --force to propagate the reviewed state."
+        "Re-run step 4 with --force, then steps 5 and 6, to propagate the "
+        "reviewed state."
     )
 
 

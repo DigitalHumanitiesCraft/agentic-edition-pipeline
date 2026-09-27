@@ -1,7 +1,8 @@
-"""Runnable checks for step 6: a TEI file that cannot be parsed is a failure.
+"""Runnable checks for step 6: every unpublishable TEI is a reported failure.
 
 The frontend build skipped unparseable files and still exited 0, so a
-missing object in the catalog looked like a clean run.
+missing object in the catalog looked like a clean run. Failures now carry
+their cause into results/frontend/errors.json, never into docs/.
 """
 
 import json
@@ -38,10 +39,9 @@ def _prepare(monkeypatch, tmp_path, name: str, content: str):
     data.mkdir(parents=True)
     (tei / name).write_text(content, encoding="utf-8")
     monkeypatch.setattr(step6, "RESULTS_TEI_DIR", tei)
-    monkeypatch.setattr(step6, "DOCS_DATA_DIR", data)
-    monkeypatch.setattr(step6, "DOCS_TEI_DIR", docs_tei)
+    monkeypatch.setattr(step6, "RESULTS_REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(step6, "ERRORS_DIR", tmp_path / "frontend")
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
-    monkeypatch.setattr(step6, "PROJECT_ROOT", project)
     monkeypatch.setattr(step6, "ensure_dirs", lambda: None)
     monkeypatch.setattr(step6, "project_info", lambda: {"title": "Projekt"})
     monkeypatch.setattr(step6, "ordered_page_images", lambda _id: [])
@@ -59,6 +59,12 @@ def test_main_exits_nonzero_when_a_tei_file_cannot_be_parsed(monkeypatch, tmp_pa
 
     assert exc.value.code == 1
     assert not (docs_tei / "broken.xml").exists()
+    errors = json.loads(
+        (tmp_path / "frontend" / "errors.json").read_text(encoding="utf-8")
+    )["errors"]
+    assert errors[0]["stage"] == "read"
+    assert "XML parse error" in errors[0]["error"]
+    assert not (tmp_path / "project" / "docs" / "data" / "errors.json").exists()
 
 
 def test_main_returns_cleanly_for_a_parseable_corpus(monkeypatch, tmp_path):
@@ -76,22 +82,17 @@ def test_main_returns_cleanly_for_a_parseable_corpus(monkeypatch, tmp_path):
 
 def test_build_removes_all_downloads_when_no_tei_sources_exist(monkeypatch, tmp_path):
     tei = tmp_path / "tei"
-    project = tmp_path / "project"
-    docs = project / "docs"
+    docs = tmp_path / "project" / "docs"
     docs_tei = docs / "tei"
     tei.mkdir()
     docs_tei.mkdir(parents=True)
     (docs_tei / "stale.xml").write_text("stale download", encoding="utf-8")
     monkeypatch.setattr(step6, "RESULTS_TEI_DIR", tei)
-    monkeypatch.setattr(step6, "DOCS_TEI_DIR", docs_tei)
-    monkeypatch.setattr(step6, "DOCS_DATA_DIR", docs / "data")
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
-    monkeypatch.setattr(step6, "PROJECT_ROOT", project)
 
-    with pytest.raises(SystemExit) as exc:
-        step6.build_all(force=True)
+    with pytest.raises(ValueError, match="No TEI files"):
+        step6.build_all()
 
-    assert exc.value.code == 1
     assert not (docs_tei / "stale.xml").exists()
 
 
@@ -105,15 +106,11 @@ def test_build_rejects_casefold_collisions_before_publication(monkeypatch):
 
     monkeypatch.setattr(step6, "RESULTS_TEI_DIR", Candidates())
 
-    with pytest.raises(SystemExit) as exc:
-        step6.build_all(force=True)
-
-    assert exc.value.code == 1
+    with pytest.raises(ValueError, match="case"):
+        step6.build_all()
 
 
-def test_download_copy_errors_are_reported_and_propagated(
-    monkeypatch, tmp_path, capsys
-):
+def test_download_copy_errors_are_reported_and_propagated(monkeypatch, tmp_path):
     data, docs_tei = _prepare(monkeypatch, tmp_path, "doc1.xml", MINIMAL_TEI)
     (data / "doc1.json").write_text(
         json.dumps(
@@ -132,23 +129,29 @@ def test_download_copy_errors_are_reported_and_propagated(
     stale_asset = docs_tei / "doc1.xml"
     stale_asset.write_text("stale download", encoding="utf-8")
 
-    def fail_copy(_source, _destination):
-        raise OSError("publication copy failed")
+    write = step6.write_bytes_atomic
 
-    monkeypatch.setattr(step6.shutil, "copyfileobj", fail_copy)
+    def fail_tei_copy(path, content):
+        if path.parent.name == "tei":
+            raise OSError("publication copy failed")
+        write(path, content)
 
-    errors = step6.build_all(force=False)
+    monkeypatch.setattr(step6, "write_bytes_atomic", fail_tei_copy)
 
-    assert errors == [
-        {
-            "object_id": "doc1",
-            "error": "publication copy failed",
-            "stage": "publish",
-        }
-    ]
-    assert "TEI download mirror: publication copy failed" in capsys.readouterr().err
+    errors, total = step6.build_all()
+
+    assert (errors, total) == (
+        [
+            {
+                "object_id": "doc1",
+                "error": "publication copy failed",
+                "stage": "publish",
+            }
+        ],
+        1,
+    )
     assert not stale_asset.exists()
-    assert not list(docs_tei.glob(".*.tmp"))
+    assert not (data / "doc1.json").exists()
 
 
 def test_prefixed_tei_and_leaf_labels_are_extracted_in_document_order():
@@ -192,6 +195,11 @@ def test_frontend_client_uses_the_catalog_page_count_contract():
     )
 
 
+def _attach(object_id, pages, expected):
+    files = step6._facsimiles(object_id, pages, expected, step6.DOCS_DIR)
+    step6._publish_images(object_id, files)
+
+
 def test_frontend_blocks_facsimile_bytes_that_differ_from_tei_provenance(
     monkeypatch, tmp_path
 ):
@@ -203,7 +211,7 @@ def test_frontend_blocks_facsimile_bytes_that_differ_from_tei_provenance(
     monkeypatch.setattr(step6, "DOCS_DIR", tmp_path / "docs")
 
     with pytest.raises(ValueError, match="differ from the transcription"):
-        step6._attach_images(
+        _attach(
             "doc1",
             [{"page": 1, "label": "1", "text": "Text", "image": ""}],
             expected,
@@ -223,7 +231,7 @@ def test_frontend_uses_verified_committed_images_when_sources_are_absent(
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
     pages = [{"page": 1, "label": "1", "text": "Text", "image": "remote"}]
 
-    step6._attach_images("doc1", pages, expected)
+    _attach("doc1", pages, expected)
 
     assert pages[0]["image"] == "images/doc1/doc1_p001.png"
 
@@ -243,7 +251,7 @@ def test_frontend_replaces_newer_corrupt_publication_copy_atomically(
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
     pages = [{"page": 1, "label": "1", "text": "Text", "image": ""}]
 
-    step6._attach_images("doc1", pages, expected)
+    _attach("doc1", pages, expected)
 
     assert target.read_bytes() == b"verified source"
 
@@ -269,7 +277,7 @@ def test_frontend_removes_stale_pages_from_a_published_object(monkeypatch, tmp_p
         for page in (1, 2)
     ]
 
-    step6._attach_images("doc1", pages, expected)
+    _attach("doc1", pages, expected)
 
     assert not stale.exists()
 
@@ -285,13 +293,9 @@ def test_withdrawn_object_removes_all_publication_assets(monkeypatch, tmp_path):
     (data / "withdrawn.json").write_text("{}", encoding="utf-8")
     (tei / "withdrawn.xml").write_text("<TEI/>", encoding="utf-8")
     (images / "page1.png").write_bytes(b"image")
-    monkeypatch.setattr(step6, "PROJECT_ROOT", project)
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
-    monkeypatch.setattr(step6, "DOCS_DATA_DIR", data)
-    monkeypatch.setattr(step6, "DOCS_TEI_DIR", tei)
 
-    step6._remove_stale_tei_assets(set())
-    step6._remove_stale_frontend_assets(set())
+    step6._remove_stale_assets(set())
 
     assert not (data / "withdrawn.json").exists()
     assert not (tei / "withdrawn.xml").exists()
@@ -309,7 +313,10 @@ def test_frontend_rejects_unsafe_tei_filename_before_image_resolution(
 
     monkeypatch.setattr(step6, "ordered_page_images", should_not_run)
 
-    assert step6.process_tei(tei_path) is None
+    with pytest.raises(config.ItemFailure) as failure:
+        step6.process_tei(tei_path)
+
+    assert failure.value.stage == "contract"
 
 
 def _make_directory_link(link, destination):
@@ -318,6 +325,7 @@ def _make_directory_link(link, destination):
             ("cmd", "/c", "mklink", "/J", str(link), str(destination)),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
         )
         if completed.returncode != 0:
@@ -341,7 +349,7 @@ def test_current_facsimile_directory_rejects_links(monkeypatch, tmp_path):
 
     try:
         with pytest.raises(ValueError, match="symlink or reparse point"):
-            step6._attach_images("doc1", [], "")
+            _attach("doc1", [], "")
     finally:
         remove_link()
 
@@ -359,52 +367,95 @@ def test_tei_publication_rejects_linked_directory_without_touching_external_file
     protected.write_text("external content", encoding="utf-8")
     publication_link = docs / "tei"
     remove_link = _make_directory_link(publication_link, external)
-    monkeypatch.setattr(step6, "PROJECT_ROOT", project)
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
-    monkeypatch.setattr(step6, "DOCS_TEI_DIR", publication_link)
 
     try:
         with pytest.raises(ValueError, match="symlink or reparse point"):
             if operation == "cleanup":
-                step6._remove_stale_tei_assets(set())
+                step6._remove_stale_assets(set())
             else:
-                source_dir = tmp_path / "source"
-                source_dir.mkdir()
-                source = source_dir / "doc1.xml"
-                source.write_text(MINIMAL_TEI, encoding="utf-8")
-                step6._copy_tei_asset(source)
+                step6._write_if_changed(
+                    step6.publication_dir("tei") / "doc1.xml", MINIMAL_TEI.encode()
+                )
     finally:
         remove_link()
 
     assert protected.read_text(encoding="utf-8") == "external content"
 
 
-def test_tei_copy_rejects_legacy_temporary_junction_without_touching_external_files(
+def _report(tmp_path, object_id: str, state_hash: str) -> None:
+    reports = tmp_path / "reports"
+    reports.mkdir(exist_ok=True)
+    (reports / f"{object_id}_validation.json").write_text(
+        json.dumps({"_meta": {"validation_state_hash": state_hash}}),
+        encoding="utf-8",
+    )
+
+
+DERIVED_TEI = MINIMAL_TEI.replace(
+    "</sourceDesc></fileDesc></teiHeader>",
+    '</sourceDesc></fileDesc><revisionDesc><change when="2026-09-01T00:00:00+00:00">'
+    "validation_state_hash=aaaaaaaaaaaa.</change></revisionDesc></teiHeader>",
+)
+
+
+def test_tei_left_behind_by_a_failed_regeneration_is_not_published(
     monkeypatch, tmp_path
 ):
-    project = tmp_path / "project"
-    docs = project / "docs"
-    publication_dir = docs / "tei"
-    external = tmp_path / "external"
-    publication_dir.mkdir(parents=True)
-    external.mkdir()
-    protected = external / "keep.xml"
-    protected.write_text("external content", encoding="utf-8")
-    legacy_temporary = publication_dir / "doc1.xml.tmp"
-    remove_link = _make_directory_link(legacy_temporary, external)
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    source = source_dir / "doc1.xml"
-    source.write_text(MINIMAL_TEI, encoding="utf-8")
-    monkeypatch.setattr(step6, "PROJECT_ROOT", project)
-    monkeypatch.setattr(step6, "DOCS_DIR", docs)
-    monkeypatch.setattr(step6, "DOCS_TEI_DIR", publication_dir)
+    data, docs_tei = _prepare(monkeypatch, tmp_path, "doc1.xml", DERIVED_TEI)
+    _report(tmp_path, "doc1", "bbbbbbbbbbbb")
 
-    try:
-        with pytest.raises(ValueError, match="publication file through symlink"):
-            step6._copy_tei_asset(source)
-    finally:
-        remove_link()
+    errors, _ = step6.build_all()
 
-    assert protected.read_text(encoding="utf-8") == "external content"
-    assert not (publication_dir / "doc1.xml").exists()
+    assert [(error["object_id"], error["stage"]) for error in errors] == [
+        ("doc1", "stale")
+    ]
+    assert not (data / "doc1.json").exists()
+    assert not (docs_tei / "doc1.xml").exists()
+
+
+def test_tei_matching_its_report_and_external_tei_are_published(monkeypatch, tmp_path):
+    data, _ = _prepare(monkeypatch, tmp_path, "doc1.xml", DERIVED_TEI)
+    (tmp_path / "tei" / "external.xml").write_text(MINIMAL_TEI, encoding="utf-8")
+    _report(tmp_path, "doc1", "aaaaaaaaaaaa")
+
+    errors, total = step6.build_all()
+
+    assert (errors, total) == ([], 2)
+    assert (data / "doc1.json").is_file()
+    assert (data / "external.json").is_file()
+
+
+def test_catalog_order_is_casefolded_and_stable(monkeypatch, tmp_path):
+    data, _ = _prepare(monkeypatch, tmp_path, "beta.xml", MINIMAL_TEI)
+    for name in ("Alpha.xml", "gamma.xml"):
+        (tmp_path / "tei" / name).write_text(MINIMAL_TEI, encoding="utf-8")
+
+    step6.build_all()
+    first = (data / "catalog.json").read_bytes()
+    step6.build_all()
+
+    catalog = json.loads(first)
+    assert [entry["id"] for entry in catalog["objects"]] == ["Alpha", "beta", "gamma"]
+    assert "source_hash" not in catalog
+    assert (data / "catalog.json").read_bytes() == first
+
+
+def test_preview_server_binds_only_the_loopback_interface(monkeypatch):
+    bound = []
+
+    class FakeServer:
+        def __init__(self, address, _handler):
+            bound.append(address)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(step6.http.server, "HTTPServer", FakeServer)
+
+    step6.serve(8123)
+
+    assert bound == [("127.0.0.1", 8123)]

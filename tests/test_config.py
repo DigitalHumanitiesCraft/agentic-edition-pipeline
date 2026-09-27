@@ -99,7 +99,7 @@ def test_manifest_hash_blocks_changed_facsimile(monkeypatch, tmp_path):
                     {
                         "page": 1,
                         "filename": image.name,
-                        "sha256": step1._file_hash(image),
+                        "sha256": config.file_sha256(image),
                     }
                 ],
             }
@@ -127,7 +127,7 @@ def test_materialized_remote_url_must_match_inventory(monkeypatch, tmp_path):
                         "page": 1,
                         "filename": image.name,
                         "image_url": "https://example.org/a.png",
-                        "sha256": step1._file_hash(image),
+                        "sha256": config.file_sha256(image),
                     }
                 ],
             }
@@ -164,13 +164,13 @@ def test_complete_pdf_extraction_requires_matching_source_hash(tmp_path):
         json.dumps(
             {
                 "source_pdf": "doc1.pdf",
-                "source_sha256": step1._file_hash(pdf),
+                "source_sha256": config.file_sha256(pdf),
                 "dpi": 300,
                 "pages": [
                     {
                         "page": 1,
                         "filename": image.name,
-                        "sha256": step1._file_hash(image),
+                        "sha256": config.file_sha256(image),
                     }
                 ],
             }
@@ -188,15 +188,47 @@ def test_pdf_collection_rejects_casefold_collisions(monkeypatch):
         def glob(self, _pattern):
             return [Path("Doc.pdf"), Path("doc.pdf")]
 
-        def __str__(self):
-            return "sources/pdf"
-
     monkeypatch.setattr(step1, "PDF_DIR", Sources())
 
     with pytest.raises(SystemExit) as exc:
-        step1.collect_pdfs(None, True)
+        step1.collect_pdfs(None, True, None)
 
     assert exc.value.code == 1
+
+
+def test_pdf_collection_selects_by_object_id_and_sample(tmp_path, monkeypatch):
+    for name in ("b", "a", "c"):
+        (tmp_path / f"{name}.pdf").write_bytes(b"pdf")
+    monkeypatch.setattr(step1, "PDF_DIR", tmp_path)
+
+    assert step1.collect_pdfs("c", False, None) == [tmp_path / "c.pdf"]
+    assert step1.collect_pdfs(None, True, 2) == [tmp_path / "a.pdf", tmp_path / "b.pdf"]
+
+
+def test_interrupted_extraction_closes_the_pdf(tmp_path, monkeypatch):
+    pdf = tmp_path / "doc1.pdf"
+    with step1.fitz.open() as document:
+        document.new_page()
+        document.save(pdf)
+    monkeypatch.setattr(step1, "IMAGES_DIR", tmp_path / "images")
+
+    def interrupt(_path, _content):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(step1, "write_bytes_atomic", interrupt)
+    opened = []
+    real_open = step1.fitz.open
+
+    def tracking_open(path):
+        opened.append(real_open(path))
+        return opened[-1]
+
+    monkeypatch.setattr(step1.fitz, "open", tracking_open)
+
+    with pytest.raises(KeyboardInterrupt):
+        step1.extract_one(pdf, 72, force=True)
+
+    assert opened[0].is_closed
 
 
 PROJECT_TEMPLATE = Path(__file__).parent.parent / "knowledge" / "01_PROJECT.md"
@@ -313,6 +345,41 @@ def test_read_json_names_the_path_of_invalid_content(tmp_path):
         config.read_json(path)
     with pytest.raises(FileNotFoundError):
         config.read_json(tmp_path / "absent.json")
+
+
+def _load_failure(directory, object_id, violations=lambda _data: []):
+    with pytest.raises(config.ItemFailure) as failure:
+        config.load_checked_json(directory, object_id, violations)
+    return failure.value
+
+
+def test_load_checked_json_returns_a_conforming_input(tmp_path):
+    (tmp_path / "doc1.json").write_text('{"object_id": "doc1"}', encoding="utf-8")
+    seen = []
+
+    data = config.load_checked_json(tmp_path, "doc1", lambda d: seen.append(d) or [])
+
+    assert data == {"object_id": "doc1"} == seen[0]
+
+
+def test_load_checked_json_names_the_failing_stage(tmp_path):
+    (tmp_path / "broken.json").write_text("{ not json", encoding="utf-8")
+    (tmp_path / "other.json").write_text('{"object_id": "doc9"}', encoding="utf-8")
+    (tmp_path / "bad.json").write_text('{"object_id": "bad"}', encoding="utf-8")
+
+    unsafe = _load_failure(tmp_path, "../doc1")
+    assert (unsafe.stage, unsafe.message) == (
+        "contract",
+        "object_id is not a path-safe identifier",
+    )
+    assert _load_failure(tmp_path, "absent").stage == "read"
+    broken = _load_failure(tmp_path, "broken")
+    assert broken.stage == "read" and "broken.json" in broken.message
+    mismatch = _load_failure(tmp_path, "other")
+    assert mismatch.stage == "contract"
+    assert "'doc9' does not match filename 'other'" in mismatch.message
+    violation = _load_failure(tmp_path, "bad", lambda _data: ["pages is empty"])
+    assert violation.message == "Input violates the data contract: pages is empty"
 
 
 def test_provenance_meta_does_not_invent_a_prompt_hash():

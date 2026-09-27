@@ -3,9 +3,9 @@
 The validation target is a per-project decision (ADR-005): set
 VALIDATION_SCHEMA in pipeline/config.py or pass --schema. The default is
 schemas/tei_all.rng, which the deterministic generator's output satisfies as
-shipped. The DTABf profile (schemas/basisformat.rng) also ships, but the
-generator's header does not pass it (journal, 2026-07-18), so a strict-DTABf
-fork adapts the header template first (see schemas/README.md).
+shipped. The DTABf profile is not shipped (schemas/README.md names its
+source), and the generator's header does not pass it (journal, 2026-07-18),
+so a strict-DTABf fork adapts the header template first.
 
 Compiling tei_all.rng takes seconds, and the review server validates on
 every save, so compiled validators are cached per process and keyed by the

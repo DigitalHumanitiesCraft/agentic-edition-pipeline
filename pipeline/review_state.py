@@ -1,24 +1,49 @@
-"""Expose explicitly bound dependency state and record review edits in TEI."""
+"""Expose explicitly bound dependency state and record review edits in TEI.
+
+Also holds the repository-wide writer lock that the review server, its
+recovery CLI and update_review.py share, and the repository-relative paths
+of the review transaction marker and snapshots.
+"""
 
 from __future__ import annotations
 
 import json
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from lxml import etree
 
 import contract
-from config import NS, safe_xml_parser
+from config import (
+    NS,
+    PROJECT_ROOT,
+    REVIEW_BACKUP_DIR,
+    REVIEW_PENDING_MARKER,
+    safe_path,
+    safe_xml_parser,
+)
 from config import TEI_NS as TEI
 from config import XML_NS as XML
+
+# Relative, so every repository root (the real one, a test root) resolves
+# the same layout through safe_path.
+BACKUP_DIR = REVIEW_BACKUP_DIR.relative_to(PROJECT_ROOT)
+PENDING_MARKER = REVIEW_PENDING_MARKER.relative_to(PROJECT_ROOT)
 
 
 def canonical_sha256(data: dict) -> str:
     return contract.canonical_hash(data, length=None)
 
 
-def dependencies(root: Path, object_id: str, data: dict) -> list[dict]:
+def dependencies(root: Path, object_id: str, data: dict | None) -> list[dict]:
+    """Report the binding state of optional annotations to the canonical text.
+
+    data is the canonical transcription, or None when it is unavailable; a
+    binding that cannot be compared then counts as unreadable.
+    """
     path = root / "data/annotations" / f"{object_id}.json"
     if not path.exists() and not path.is_symlink():
         return []
@@ -28,6 +53,8 @@ def dependencies(root: Path, object_id: str, data: dict) -> list[dict]:
             raise ValueError("Linked annotation file")
         annotations = json.loads(path.read_bytes())
         binding = annotations.get("_meta", {}).get("transcription_sha256")
+        if binding and data is None:
+            raise ValueError("Canonical transcription unavailable")
         if binding:
             state = "current" if binding == canonical_sha256(data) else "stale"
     except (OSError, ValueError, AttributeError):
@@ -118,3 +145,38 @@ def workflow(xml_root) -> dict:
             item["type"] == "transcription-correction" for item in changes
         ),
     }
+
+
+@contextmanager
+def repository_writer(root: Path) -> Iterator[None]:
+    """Keep review server, recovery and review transitions mutually exclusive.
+
+    An operating-system lock on results/review-backups/writer.lock, released
+    when the holding process ends.
+    """
+    path = safe_path(root.resolve(), BACKUP_DIR / "writer.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if sys.platform == "win32":
+            import msvcrt
+
+            if path.stat().st_size == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                raise RuntimeError(
+                    "Another review server, recovery or review update owns this repository"
+                ) from None
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise RuntimeError(
+                    "Another review server, recovery or review update owns this repository"
+                ) from None
+        yield

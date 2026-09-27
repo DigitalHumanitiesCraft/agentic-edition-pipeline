@@ -611,6 +611,17 @@ def test_characters_outside_xml_are_rejected(fixture_transcription, field):
         assert expected not in contract.file_violations(fixture_transcription)
 
 
+@pytest.mark.parametrize("field", ["title", "signature", "date", "repository"])
+def test_metadata_characters_outside_xml_are_rejected(fixture_transcription, field):
+    fixture_transcription["metadata"][field] = "A" + chr(0x0B) + "1"
+    expected = f"metadata.{field} contains a character not allowed in XML"
+
+    assert expected in contract.file_violations(fixture_transcription)
+    assert expected in contract.metadata_violations(fixture_transcription["metadata"])
+    fixture_transcription["metadata"][field] = "Grüße" + chr(9) + chr(0x1D11E)
+    assert contract.metadata_violations(fixture_transcription["metadata"]) == []
+
+
 def test_page_stats_describe_the_current_text():
     pages = [
         {"page": 1, "transcription": "eins zwei\ndrei"},

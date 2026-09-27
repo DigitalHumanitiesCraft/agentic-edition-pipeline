@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
-import importlib.util
+import importlib
 import io
 import json
 import secrets
@@ -20,50 +20,69 @@ import tempfile
 import threading
 import uuid
 import zipfile
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from types import ModuleType
 from urllib.parse import unquote, urlsplit
 
 import contract
 from config import (
     PROJECT_ROOT,
     VALIDATION_SCHEMA,
+    ItemFailure,
+    configure_console,
     json_bytes,
     project_info,
     safe_path,
     write_bytes_atomic,
 )
 from review_assets import prepare_viewer
-from review_state import dependencies
+from review_state import BACKUP_DIR, PENDING_MARKER, dependencies, repository_writer
 from update_review import update_page_review
 from validate_schema import validate_files
 
+validator = importlib.import_module("04_validate")
+annotator = importlib.import_module("05_annotate_tei")
+
 MAX_BODY = 2 * 1024 * 1024
+# Far above one manuscript page and far below MAX_BODY, so an oversized
+# field gets a precise 400 instead of an opaque contract failure.
+MAX_TEXT_CHARS = 200_000
+MAX_NOTE_CHARS = 10_000
+MAX_ACTOR_CHARS = 200
+# The only targets recovery may restore or remove; a snapshot naming any
+# other path is refused.
+RECOVERABLE_PREFIXES = (
+    "data/processed/",
+    "results/tei/",
+    "results/reports/",
+    "docs/data/",
+    "docs/tei/",
+)
+# The meta CSP of docs/index.html, plus frame-ancestors, which only takes
+# effect as a header.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
+    "img-src 'self' http: https:; connect-src 'self'; object-src 'none'; "
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+)
 
 
 def _json_bytes(value: object) -> bytes:
     return json_bytes(value)
 
 
-def _load_step(name: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        f"review_{name}_{uuid.uuid4().hex}", Path(__file__).parent / f"{name}.py"
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load pipeline stage {name}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def prepare_artifacts(root: Path, object_id: str, data: dict) -> dict[Path, bytes]:
-    """Run existing offline stages in isolated output directories."""
-    validator = _load_step("04_validate")
-    annotator = _load_step("05_annotate_tei")
+    """Run steps 4 to 6 without model calls on a staged copy of one document."""
+    try:
+        return _prepare_artifacts(root, object_id, data)
+    except ItemFailure as failure:
+        raise ValueError(failure.message) from failure
+
+
+def _prepare_artifacts(root: Path, object_id: str, data: dict) -> dict[Path, bytes]:
     project = project_info(root / "knowledge/01_PROJECT.md")
     existing = safe_path(root, Path(f"results/tei/{object_id}.xml"))
     if existing.exists():
@@ -82,25 +101,29 @@ def prepare_artifacts(root: Path, object_id: str, data: dict) -> dict[Path, byte
             )
     with tempfile.TemporaryDirectory(prefix="edition-review-") as directory:
         stage = Path(directory)
-        validator.TRANSCRIPTIONS_DIR = stage / "data/processed/transcriptions"
-        validator.VALIDATED_DIR = stage / "data/processed/validated"
-        canonical_relative = Path(f"data/processed/transcriptions/{object_id}.json")
-        canonical_path = stage / canonical_relative
-        canonical_path.parent.mkdir(parents=True)
-        write_bytes_atomic(canonical_path, _json_bytes(data))
-        error = validator.validate_one(object_id, use_llm=False, force=True)
-        if error:
-            raise ValueError(error["error"])
-        annotator.VALIDATED_DIR = validator.VALIDATED_DIR
-        annotator.TEI_DIR = stage / "data/processed/tei"
-        annotator.RESULTS_TEI_DIR = stage / "results/tei"
-        annotator.RESULTS_REPORTS_DIR = stage / "results/reports"
-        error = annotator.annotate_one(
-            object_id, project, validate_only=False, force=True
+        transcriptions_dir = stage / "data/processed/transcriptions"
+        validated_dir = stage / "data/processed/validated"
+        tei_dir = stage / "results/tei"
+        transcriptions_dir.mkdir(parents=True)
+        write_bytes_atomic(transcriptions_dir / f"{object_id}.json", _json_bytes(data))
+        validator.validate_one(
+            object_id,
+            None,
+            True,
+            transcriptions_dir=transcriptions_dir,
+            validated_dir=validated_dir,
+            calls_dir=stage / "data/processed/llm-calls",
         )
-        if error:
-            raise ValueError(error["error"])
-        tei_path = annotator.RESULTS_TEI_DIR / f"{object_id}.xml"
+        annotator.annotate_one(
+            object_id,
+            project,
+            validate_only=False,
+            force=True,
+            validated_dir=validated_dir,
+            tei_dir=tei_dir,
+            reports_dir=stage / "results/reports",
+        )
+        tei_path = tei_dir / f"{object_id}.xml"
         results = validate_files(VALIDATION_SCHEMA, [tei_path])
         if not all(result.valid for result in results):
             raise ValueError("Generated TEI failed RelaxNG validation")
@@ -133,7 +156,7 @@ class ReviewStore:
         if problems:
             raise ValueError("Invalid catalog identifiers: " + "; ".join(problems))
         self.object_ids = frozenset(ids)
-        self.marker = safe_path(self.root, Path("results/review-backups/pending.json"))
+        self.marker = safe_path(self.root, PENDING_MARKER)
 
     def _canonical_path(self, object_id: str) -> Path:
         if object_id not in self.object_ids or not contract.valid_object_id(object_id):
@@ -161,18 +184,35 @@ class ReviewStore:
             }
 
     def proposals(self, object_id: str) -> list[dict]:
+        """Read stored proposals; an unreadable one is reported, not fatal."""
         directory = safe_path(self.root, Path(f"data/review-proposals/{object_id}"))
-        return [
-            json.loads(safe_path(self.root, path.relative_to(self.root)).read_bytes())
-            for path in sorted(directory.glob("*.json"))
-        ]
+        proposals = []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                proposal = json.loads(
+                    safe_path(self.root, path.relative_to(self.root)).read_bytes()
+                )
+                if not isinstance(proposal, dict):
+                    raise ValueError("not a JSON object")
+            except (OSError, ValueError) as exc:
+                proposal = {"id": path.stem, "error": f"Unreadable proposal: {exc}"}
+            proposals.append(proposal)
+        return proposals
 
     def recover(self) -> None:
-        """Restore the interrupted transaction's snapshot, then unlock writes."""
+        """Restore the interrupted transaction's snapshot, then unlock writes.
+
+        Raises LookupError when no transaction is pending.
+        """
         with self.lock:
-            marker = json.loads(self.marker.read_bytes())
+            try:
+                marker = json.loads(self.marker.read_bytes())
+            except FileNotFoundError:
+                raise LookupError(
+                    "No interrupted review transaction to recover"
+                ) from None
             backup = safe_path(self.root, Path(marker["backup"]))
-            if not backup.is_relative_to(self.root / "results/review-backups"):
+            if not backup.is_relative_to(self.root / BACKUP_DIR):
                 raise ValueError("Invalid recovery snapshot path")
             raw = backup.read_bytes()
             if hashlib.sha256(raw).hexdigest() != marker["sha256"]:
@@ -187,16 +227,9 @@ class ReviewStore:
                 absent = [
                     safe_path(self.root, Path(name)) for name in manifest["absent"]
                 ]
-            allowed = (
-                "data/processed/",
-                "results/tei/",
-                "results/reports/",
-                "docs/data/",
-                "docs/tei/",
-                "docs/txt/",
-            )
             for target in [*entries, *absent]:
-                if not target.relative_to(self.root).as_posix().startswith(allowed):
+                relative = target.relative_to(self.root).as_posix()
+                if not relative.startswith(RECOVERABLE_PREFIXES):
                     raise ValueError("Recovery target outside generated artifacts")
             for target, content in entries.items():
                 write_bytes_atomic(target, content)
@@ -217,12 +250,26 @@ class ReviewStore:
         if set(request) - {*required, "actor_kind"}:
             raise ValueError("Unexpected update fields")
         actor_kind = request.get("actor_kind", "human")
-        if actor_kind not in {"human", "agent"} or not request["actor"].strip():
+        if (
+            not isinstance(actor_kind, str)
+            or actor_kind not in {"human", "agent"}
+            or not request["actor"].strip()
+        ):
             raise ValueError("An actor and actor_kind human or agent are required")
         if not request["note"].strip():
             raise ValueError("A reason for the correction is required")
-        if len(request["actor"]) > 200 or len(request["note"]) > 10000:
+        if (
+            len(request["actor"]) > MAX_ACTOR_CHARS
+            or len(request["note"]) > MAX_NOTE_CHARS
+        ):
             raise ValueError("Actor or change note exceeds the limit")
+        if (
+            len(request["transcription"]) > MAX_TEXT_CHARS
+            or len(request["notes"]) > MAX_TEXT_CHARS
+        ):
+            raise ValueError(
+                f"Transcription or notes exceed {MAX_TEXT_CHARS} characters"
+            )
         with self.lock:
             if self.marker.exists():
                 raise ValueError(
@@ -246,7 +293,7 @@ class ReviewStore:
             }
             after = {key: request[key] for key in before}
             if before == after:
-                return self.document(object_id)
+                raise ValueError("No change to save")
             timestamp = datetime.now(UTC).isoformat()
             if proposal:
                 record = {
@@ -275,9 +322,9 @@ class ReviewStore:
                     request["actor"],
                     request["note"],
                     timestamp,
+                    actor_kind,
                 )
                 page = next(page for page in data["pages"] if page["page"] == number)
-                page["review"]["history"][-1]["actor_kind"] = actor_kind
             page.update(after)
             page.setdefault("edits", []).append(
                 {
@@ -315,10 +362,7 @@ class ReviewStore:
                     "Document changed during validation; reload before saving"
                 )
             backup = safe_path(
-                self.root,
-                Path("results/review-backups")
-                / object_id
-                / f"{uuid.uuid4().hex[:16]}.zip",
+                self.root, BACKUP_DIR / object_id / f"{uuid.uuid4().hex[:16]}.zip"
             )
             snapshot = io.BytesIO()
             with zipfile.ZipFile(
@@ -355,28 +399,19 @@ class ReviewStore:
                     }
                 ),
             )
-            written = []
+            # A failed write rolls back through the same hash-checked snapshot
+            # path as --recover; an interrupted process leaves the marker.
             try:
                 for path, content in targets.items():
                     write_bytes_atomic(path, content)
-                    written.append(path)
             except Exception as error:
-                rollback_errors = []
-                for path in reversed(written):
-                    try:
-                        content = previous[path]
-                        if content is None:
-                            path.unlink(missing_ok=True)
-                        else:
-                            write_bytes_atomic(path, content)
-                    except OSError as rollback_error:
-                        rollback_errors.append(str(rollback_error))
-                if rollback_errors:
+                try:
+                    self.recover()
+                except Exception as rollback_error:
                     raise RuntimeError(
-                        f"Rollback incomplete; recover from {backup}: "
-                        + "; ".join(rollback_errors)
+                        "Rollback incomplete; run review_server.py --recover: "
+                        f"{rollback_error}"
                     ) from error
-                self.marker.unlink()
                 raise
             self.marker.unlink()
             return self.document(object_id)
@@ -391,6 +426,7 @@ class ReviewHandler(SimpleHTTPRequestHandler):
         )
 
     def end_headers(self) -> None:
+        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
@@ -541,37 +577,6 @@ class ReviewServer(ThreadingHTTPServer):
         return connection, address
 
 
-@contextmanager
-def repository_writer(root: Path):
-    """Keep server and recovery CLI mutually exclusive across processes."""
-    path = safe_path(root.resolve(), Path("results/review-backups/writer.lock"))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+b") as handle:
-        if sys.platform == "win32":
-            import msvcrt
-
-            if path.stat().st_size == 0:
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
-            try:
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError:
-                raise RuntimeError(
-                    "Another review server or recovery owns this repository"
-                ) from None
-        else:
-            import fcntl
-
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                raise RuntimeError(
-                    "Another review server or recovery owns this repository"
-                ) from None
-        yield
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Serve the local edition editor with repository persistence."
@@ -583,11 +588,14 @@ def main() -> None:
         help="Restore an interrupted transaction and exit",
     )
     args = parser.parse_args()
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    configure_console()
     with repository_writer(PROJECT_ROOT):
         if args.recover:
-            ReviewStore(PROJECT_ROOT).recover()
+            try:
+                ReviewStore(PROJECT_ROOT).recover()
+            except (LookupError, OSError, ValueError) as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                sys.exit(1)
             print("Interrupted transaction restored. Restart the review server.")
             return
         with ReviewServer(ReviewStore(PROJECT_ROOT), args.port) as server:

@@ -70,8 +70,8 @@ METADATA_TEXT_FIELDS = (
     "extent",
     "repository",
 )
-# Complement of the XML 1.0 Char production. A page text with such a
-# character cannot become TEI, so it is rejected before it is stored.
+# Complement of the XML 1.0 Char production. A page text or a metadata field
+# with such a character cannot become TEI, so it is rejected before it is stored.
 XML_INVALID_CHAR = re.compile(r"[^\t\n\r\x20-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]")
 
 
@@ -729,8 +729,12 @@ def metadata_violations(metadata: object, prefix: str = "metadata") -> list[str]
             problems.append(f"{prefix}.image_urls contains an invalid URL")
 
     for key in METADATA_TEXT_FIELDS:
-        if key in metadata and not isinstance(metadata[key], str):
+        if key not in metadata:
+            continue
+        if not isinstance(metadata[key], str):
             problems.append(f"{prefix}.{key} is not a string")
+        elif XML_INVALID_CHAR.search(metadata[key]):
+            problems.append(f"{prefix}.{key} contains a character not allowed in XML")
     return problems
 
 

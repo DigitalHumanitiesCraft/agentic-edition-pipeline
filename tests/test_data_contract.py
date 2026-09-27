@@ -24,12 +24,10 @@ config = load_step("config")
 contract = load_step("contract")
 
 
-# ---------------------------------------------------------------------------
 # Step 4: contract pass-through and status mapping
-# ---------------------------------------------------------------------------
 
 
-def _run_validate(monkeypatch, tmp_path, fixture):
+def _run_validate(tmp_path, fixture):
     src_dir = tmp_path / "transcriptions"
     dst_dir = tmp_path / "validated"
     src_dir.mkdir()
@@ -37,33 +35,36 @@ def _run_validate(monkeypatch, tmp_path, fixture):
     (src_dir / "fixture1.json").write_text(
         json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
     )
-    monkeypatch.setattr(step4, "TRANSCRIPTIONS_DIR", src_dir)
-    monkeypatch.setattr(step4, "VALIDATED_DIR", dst_dir)
-    err = step4.validate_one("fixture1", use_llm=False, force=True)
-    assert err is None
-    return json.loads((dst_dir / "fixture1.json").read_text(encoding="utf-8"))
+    status = step4.validate_one(
+        "fixture1",
+        None,
+        force=True,
+        transcriptions_dir=src_dir,
+        validated_dir=dst_dir,
+    )
+    output = json.loads((dst_dir / "fixture1.json").read_text(encoding="utf-8"))
+    assert status == output["overall_status"]
+    return output
 
 
-def test_validate_passes_pages_and_metadata_through(
-    monkeypatch, tmp_path, fixture_transcription
-):
-    out = _run_validate(monkeypatch, tmp_path, fixture_transcription)
+def test_validate_passes_pages_and_metadata_through(tmp_path, fixture_transcription):
+    out = _run_validate(tmp_path, fixture_transcription)
     assert out["pages"] == fixture_transcription["pages"]
     assert out["metadata"] == fixture_transcription["metadata"]
     assert out["transcription_meta"] == fixture_transcription["_meta"]
 
 
 def test_step4_output_still_satisfies_the_runtime_contract(
-    monkeypatch, tmp_path, fixture_transcription
+    tmp_path, fixture_transcription
 ):
-    out = _run_validate(monkeypatch, tmp_path, fixture_transcription)
+    out = _run_validate(tmp_path, fixture_transcription)
     assert contract.file_violations(out) == []
 
 
 def test_needs_review_signal_maps_to_needs_review_not_problematic(
-    monkeypatch, tmp_path, fixture_transcription
+    tmp_path, fixture_transcription
 ):
-    out = _run_validate(monkeypatch, tmp_path, fixture_transcription)
+    out = _run_validate(tmp_path, fixture_transcription)
     assert out["overall_status"] == "needs_review"
 
 
@@ -91,9 +92,7 @@ def test_status_mapping_decision_tree():
     assert step4.compute_overall_status(three_errors, None, None) == "problematic"
 
 
-# ---------------------------------------------------------------------------
 # Step 5: TEI header, facsimile, body structure
-# ---------------------------------------------------------------------------
 
 
 def _generate_root(fixture, project=None):
@@ -101,16 +100,16 @@ def _generate_root(fixture, project=None):
     return etree.fromstring(xml.encode("utf-8")), xml
 
 
-def test_title_and_language_reach_tei_header(fixture_transcription):
-    root, _ = _generate_root(fixture_transcription)
+def test_title_and_language_reach_tei_header(fixture_validated):
+    root, _ = _generate_root(fixture_validated)
     title = root.find(".//tei:titleStmt/tei:title", NS)
     assert title is not None and title.text == "Brief vom 22. Mai 1901"
     lang = root.find(".//tei:langUsage/tei:language", NS)
     assert lang is not None and lang.get("ident") == "fr"
 
 
-def test_facsimile_graphic_urls_and_pb_pointers(fixture_transcription):
-    root, _ = _generate_root(fixture_transcription)
+def test_facsimile_graphic_urls_and_pb_pointers(fixture_validated):
+    root, _ = _generate_root(fixture_validated)
     graphics = root.findall(".//tei:facsimile/tei:graphic", NS)
     urls = {g.get("url") for g in graphics}
     assert "https://example.org/o:fixture1/IMG.1" in urls
@@ -119,23 +118,23 @@ def test_facsimile_graphic_urls_and_pb_pointers(fixture_transcription):
     assert pb1 is not None and pb1.get("facs") == "#facs_1"
 
 
-def test_diplomatic_line_breaks_as_lb(fixture_transcription):
-    root, _ = _generate_root(fixture_transcription)
+def test_diplomatic_line_breaks_as_lb(fixture_validated):
+    root, _ = _generate_root(fixture_validated)
     first_p = root.find(".//tei:body//tei:p", NS)
     assert first_p is not None
     assert len(first_p.findall("tei:lb", NS)) == 1  # two lines, one break
     assert "".join(first_p.itertext()) == "Erste ZeileZweite Zeile"
 
 
-def test_normalised_edition_type_joins_lines(fixture_transcription):
-    root, _ = _generate_root(fixture_transcription, {"edition_type": "Normalisiert"})
+def test_normalised_edition_type_joins_lines(fixture_validated):
+    root, _ = _generate_root(fixture_validated, {"edition_type": "Normalisiert"})
     first_p = root.find(".//tei:body//tei:p", NS)
     assert len(first_p.findall("tei:lb", NS)) == 0
     assert first_p.text == "Erste Zeile Zweite Zeile"
 
 
-def test_foreign_text_stays_out_of_edited_body(fixture_transcription):
-    root, _ = _generate_root(fixture_transcription)
+def test_foreign_text_stays_out_of_edited_body(fixture_validated):
+    root, _ = _generate_root(fixture_validated)
     p_texts = ["".join(p.itertext()) for p in root.findall(".//tei:body//tei:p", NS)]
     assert not any("Anderer Beitrag" in t for t in p_texts)
     assert not any("Fremder Absatz" in t for t in p_texts)
@@ -147,46 +146,46 @@ def test_foreign_text_stays_out_of_edited_body(fixture_transcription):
     assert any("Fremder Absatz" in t for t in foreign)
 
 
-def test_whole_foreign_page_preserves_paragraph_boundaries(fixture_transcription):
-    fixture_transcription["pages"][2]["transcription"] = "First\n\nSecond"
+def test_whole_foreign_page_preserves_paragraph_boundaries(fixture_validated):
+    fixture_validated["pages"][2]["transcription"] = "First\n\nSecond"
 
-    root, xml = _generate_root(fixture_transcription)
+    root, xml = _generate_root(fixture_validated)
 
     foreign = root.findall(".//tei:body//tei:note[@type='foreign']", NS)
     assert ["".join(note.itertext()) for note in foreign[-2:]] == ["First", "Second"]
-    assert step5.validate_tei(xml, fixture_transcription["pages"])["plaintext_exact"]
+    assert step5.validate_tei(xml, fixture_validated["pages"])["plaintext_exact"]
 
 
-def test_gate_and_empty_page_notes(fixture_transcription):
-    root, _ = _generate_root(fixture_transcription)
+def test_gate_and_empty_page_notes(fixture_validated):
+    root, _ = _generate_root(fixture_validated)
     gate = root.find(".//tei:body//tei:note[@type='gate']", NS)
     assert gate is not None and gate.get("subtype") == "low_resolution"
     empties = root.findall(".//tei:body//tei:note[@type='empty']", NS)
     assert len(empties) == 1  # page 5 (undeclared), not page 2 (declared blank)
 
 
-def test_generated_tei_is_well_formed_and_valid_report(fixture_transcription):
-    _, xml = _generate_root(fixture_transcription)
-    report = step5.validate_tei(xml, fixture_transcription["pages"])
+def test_generated_tei_is_well_formed_and_valid_report(fixture_validated):
+    _, xml = _generate_root(fixture_validated)
+    report = step5.validate_tei(xml, fixture_validated["pages"])
     assert report["well_formed"]
     assert report["required_elements"]
 
 
-def test_diplomatic_roundtrip_rejects_a_lost_line_break(fixture_transcription):
-    _, xml = _generate_root(fixture_transcription)
+def test_diplomatic_roundtrip_rejects_a_lost_line_break(fixture_validated):
+    _, xml = _generate_root(fixture_validated)
     broken = xml.replace("Erste Zeile<lb/>Zweite Zeile", "Erste Zeile Zweite Zeile")
 
-    report = step5.validate_tei(broken, fixture_transcription["pages"])
+    report = step5.validate_tei(broken, fixture_validated["pages"])
 
     assert report["plaintext_exact"] is False
 
 
-def test_tei_carries_the_least_mature_human_review_status(fixture_transcription):
-    for page in fixture_transcription["pages"]:
+def test_tei_carries_the_least_mature_human_review_status(fixture_validated):
+    for page in fixture_validated["pages"]:
         page["review"] = {"status": "accepted", "history": []}
-    fixture_transcription["pages"][2]["review"]["status"] = "in_review"
+    fixture_validated["pages"][2]["review"]["status"] = "in_review"
 
-    root, _ = _generate_root(fixture_transcription)
+    root, _ = _generate_root(fixture_validated)
 
     revision = root.find(".//tei:revisionDesc", NS)
     change = root.find(".//tei:revisionDesc/tei:change", NS)
@@ -194,22 +193,20 @@ def test_tei_carries_the_least_mature_human_review_status(fixture_transcription)
     assert change is not None and change.get("status") == "in_review"
 
 
-def test_tei_generation_is_byte_identical_for_the_same_input(fixture_transcription):
-    first = step5.generate_tei("fixture1", fixture_transcription, {})
-    second = step5.generate_tei("fixture1", fixture_transcription, {})
+def test_tei_generation_is_byte_identical_for_the_same_input(fixture_validated):
+    first = step5.generate_tei("fixture1", fixture_validated, {})
+    second = step5.generate_tei("fixture1", fixture_validated, {})
 
     assert first == second
 
 
-# ---------------------------------------------------------------------------
 # Step 6: frontend extraction
-# ---------------------------------------------------------------------------
 
 
 def test_frontend_normalizes_whitespace_and_renders_remote_urls(
-    monkeypatch, tmp_path, fixture_transcription
+    monkeypatch, tmp_path, fixture_validated
 ):
-    _, xml = _generate_root(fixture_transcription)
+    _, xml = _generate_root(fixture_validated)
     tei_path = tmp_path / "fixture1.xml"
     tei_path.write_text(xml, encoding="utf-8")
 
@@ -260,9 +257,7 @@ def test_frontend_copies_local_images_into_docs(monkeypatch, tmp_path):
     assert (docs_dir / "images" / "loc1" / "loc1_p001.png").exists()
 
 
-# ---------------------------------------------------------------------------
 # Step 2: JSON source type with page counting
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_counts_json_pages_from_pages_array(
@@ -281,9 +276,7 @@ def test_analyze_counts_json_pages_from_pages_array(
     assert documents["fixture1"]["pages"] == 5
 
 
-# ---------------------------------------------------------------------------
 # API key gate
-# ---------------------------------------------------------------------------
 
 
 def test_missing_api_key_helper(monkeypatch):

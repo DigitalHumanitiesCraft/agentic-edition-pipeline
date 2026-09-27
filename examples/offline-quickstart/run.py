@@ -76,7 +76,7 @@ PIPELINE_STEPS = (
         ("pipeline/validate_schema.py", "--schema", VALIDATION_SCHEMA),
         stops_on_failure=False,
     ),
-    PipelineStep("static frontend build", ("pipeline/06_build_frontend.py", "--force")),
+    PipelineStep("static frontend build", ("pipeline/06_build_frontend.py",)),
     PipelineStep(
         "evaluation fixtures",
         ("-m", "aep_eval", EVALUATION_MANIFEST, "--out", "results/evaluation"),
@@ -419,7 +419,7 @@ def main() -> int:
         f"\nOK   offline quickstart built {len(report['objects'])} objects in {target}"
     )
     print(
-        f'PREVIEW  {sys.executable} -m http.server 8080 --directory "{target / "docs"}"'
+        f'PREVIEW  {sys.executable} -m http.server 8080 --bind 127.0.0.1 --directory "{target / "docs"}"'
     )
     return 0
 

@@ -2,6 +2,8 @@
 
 Step 4 sends the transcription text without a facsimile. The judge can identify textual anomalies and inconsistent marker use. Visual readings, handwriting classification, layout fidelity, and image quality remain outside this assessment.
 
+Each call sends one page. Step 4 appends a separator line `--- Transcription ---`, framed by blank lines, and then the page text to the fenced block below. The issue types and perspectives in the block are the vocabulary step 4 accepts. A change here must also change `JUDGE_ISSUE_TYPES` and `JUDGE_PERSPECTIVES` in `04_validate.py`.
+
 ```
 You are reviewing the internal plausibility of a diplomatic transcription. You receive transcription text only. Base every finding on evidence visible in that text.
 

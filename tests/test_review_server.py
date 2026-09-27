@@ -6,6 +6,8 @@ import copy
 import hashlib
 import http.client
 import json
+import re
+import sys
 import threading
 import zipfile
 from pathlib import Path
@@ -72,11 +74,9 @@ def test_persists_real_stages_and_preserves_original(review_root: Path) -> None:
     ) as archive:
         assert archive.read("data/processed/transcriptions/fixture1.json") == before
     tei = (review_root / "results/tei/fixture1.xml").read_bytes()
-    assert tei == (review_root / "data/processed/tei/fixture1.xml").read_bytes()
     assert tei == (review_root / "docs/tei/fixture1.xml").read_bytes()
-    assert "Korrigierte Zeile" in (review_root / "docs/txt/fixture1.txt").read_text(
-        encoding="utf-8"
-    )
+    assert not (review_root / "data/processed/tei").exists()
+    assert not (review_root / "docs/txt").exists()
     frontend = json.loads((review_root / "docs/data/fixture1.json").read_bytes())
     assert frontend["workflow"]["corrections"] == 1
     assert frontend["workflow"]["human_review"] == "in_review"
@@ -221,6 +221,20 @@ def test_http_security_and_version_conflict(running_server) -> None:
     assert (
         _request(server, "POST", "/api/documents/fixture1/pages/1", payload, headers)[0]
         == 409
+    )
+    unchanged = review_server._json_bytes(_payload(server.store))
+    status, body = _request(
+        server, "POST", "/api/documents/fixture1/pages/1", unchanged, headers
+    )
+    assert (status, json.loads(body)) == (400, {"error": "No change to save"})
+    wrong_kind = review_server._json_bytes(
+        _payload(server.store, transcription="Andere Lesung", actor_kind=["human"])
+    )
+    assert (
+        _request(
+            server, "POST", "/api/documents/fixture1/pages/1", wrong_kind, headers
+        )[0]
+        == 400
     )
     headers["Content-Length"] = str(review_server.MAX_BODY + 1)
     assert (
@@ -386,25 +400,39 @@ def test_enriched_tei_is_preserved(review_root: Path) -> None:
     assert store.document("fixture1")["version"] == before
 
 
-def test_manual_transcription_keeps_existing_local_facsimile(review_root: Path) -> None:
+def test_manual_transcription_uses_the_published_local_facsimile(
+    review_root: Path,
+) -> None:
     from review_assets import prepare_viewer
 
-    data = json.loads(
-        (review_root / "data/processed/transcriptions/fixture1.json").read_bytes()
-    )
+    source = review_root / "data/processed/transcriptions/fixture1.json"
+    data = json.loads(source.read_bytes())
+    del data["metadata"]["image_urls"]
+    source.write_bytes(review_server._json_bytes(data))
     image = review_root / "docs/images/fixture1/local.png"
     image.parent.mkdir(parents=True)
     image.write_bytes(b"synthetic")
-    previous = {"id": "fixture1", "pages": [{"image": "images/fixture1/local.png"}]}
-    (review_root / "docs/data/fixture1.json").write_bytes(
-        review_server._json_bytes(previous)
+    validated_dir = review_root / "staged-validated"
+    review_server.validator.validate_one(
+        "fixture1",
+        None,
+        True,
+        transcriptions_dir=source.parent,
+        validated_dir=validated_dir,
+        calls_dir=review_root / "staged-calls",
     )
-    xml = review_server._load_step("05_annotate_tei").generate_tei("fixture1", data, {})
+    validated = json.loads((validated_dir / "fixture1.json").read_bytes())
+    xml = review_server.annotator.generate_tei("fixture1", validated, {})
     result = prepare_viewer("fixture1", xml, data, review_root)
     assert (
         json.loads(result[Path("docs/data/fixture1.json")])["pages"][0]["image"]
         == "images/fixture1/local.png"
     )
+    assert set(result) == {
+        Path("docs/data/fixture1.json"),
+        Path("docs/tei/fixture1.xml"),
+        Path("docs/data/catalog.json"),
+    }
 
 
 def test_optional_annotations_become_stale(review_root: Path) -> None:
@@ -467,3 +495,115 @@ def test_configured_schema_can_block_save(
     with pytest.raises(ValueError, match="RelaxNG"):
         store.save("fixture1", 1, _payload(store))
     assert store.document("fixture1")["version"] == before
+
+
+def test_responses_carry_the_page_content_security_policy(running_server) -> None:
+    connection = http.client.HTTPConnection(
+        "127.0.0.1", running_server.server_address[1], timeout=60
+    )
+    try:
+        connection.request("GET", "/index.html")
+        response = connection.getresponse()
+        response.read()
+        policy = response.getheader("Content-Security-Policy")
+    finally:
+        connection.close()
+    page = Path(__file__).parent.parent / "docs/index.html"
+    meta = re.search(
+        r'http-equiv="Content-Security-Policy" content="([^"]+)"',
+        page.read_text(encoding="utf-8"),
+    )
+    assert meta is not None
+    assert policy == meta.group(1) + "; frame-ancestors 'none'"
+
+
+def test_oversized_text_and_non_string_actor_kind_are_rejected(
+    review_root: Path,
+) -> None:
+    store = review_server.ReviewStore(review_root)
+    too_long = "x" * (review_server.MAX_TEXT_CHARS + 1)
+    for extra in (
+        {"actor_kind": ["human"]},
+        {"transcription": too_long},
+        {"notes": too_long},
+    ):
+        with pytest.raises(ValueError):
+            store.save("fixture1", 1, _payload(store, **extra))
+
+
+def test_unchanged_save_is_rejected(review_root: Path) -> None:
+    store = review_server.ReviewStore(review_root)
+    page = store.document("fixture1")["pages"][0]
+    with pytest.raises(ValueError, match="No change"):
+        store.save(
+            "fixture1",
+            1,
+            _payload(store, transcription=page["transcription"], notes=page["notes"]),
+        )
+
+
+def test_recover_without_pending_transaction_exits_with_a_message(
+    review_root: Path, monkeypatch, capsys
+) -> None:
+    with pytest.raises(LookupError):
+        review_server.ReviewStore(review_root).recover()
+    monkeypatch.setattr(review_server, "PROJECT_ROOT", review_root)
+    monkeypatch.setattr(sys, "argv", ["review_server.py", "--recover"])
+    with pytest.raises(SystemExit) as exit_info:
+        review_server.main()
+    assert exit_info.value.code == 1
+    assert "No interrupted review transaction" in capsys.readouterr().err
+
+
+def test_corrupt_proposal_is_reported_without_blocking_the_document(
+    review_root: Path,
+) -> None:
+    store = review_server.ReviewStore(review_root)
+    store.save("fixture1", 1, _payload(store, actor_kind="agent"), proposal=True)
+    broken = review_root / "data/review-proposals/fixture1/broken.json"
+    broken.write_text("{", encoding="utf-8")
+
+    proposals = store.document("fixture1")["proposals"]
+
+    failed = [item for item in proposals if "error" in item]
+    assert len(proposals) == 2
+    assert [item["id"] for item in failed] == ["broken"]
+    assert failed[0]["error"].startswith("Unreadable proposal")
+
+
+def test_review_save_and_frontend_build_write_identical_data(
+    review_root: Path, monkeypatch
+) -> None:
+    import importlib
+
+    import config
+
+    step6 = importlib.import_module("06_build_frontend")
+    monkeypatch.setattr(step6, "RESULTS_TEI_DIR", review_root / "results/tei")
+    monkeypatch.setattr(step6, "RESULTS_REPORTS_DIR", review_root / "results/reports")
+    monkeypatch.setattr(step6, "DOCS_DIR", review_root / "docs")
+    monkeypatch.setattr(
+        step6,
+        "project_info",
+        lambda: config.project_info(review_root / "knowledge/01_PROJECT.md"),
+    )
+    store = review_server.ReviewStore(review_root)
+    store.save("fixture1", 1, _payload(store))
+    # A second, external object sorts before fixture1 only under casefold.
+    (review_root / "results/tei/Alpha.xml").write_bytes(
+        (review_root / "results/tei/fixture1.xml")
+        .read_bytes()
+        .replace(b"Korrigierte Zeile", b"Andere Quelle")
+        .replace(b"validation_state_hash=", b"external_state=")
+    )
+    assert step6.build_all()[0] == []
+    catalog = json.loads((review_root / "docs/data/catalog.json").read_bytes())
+    assert [entry["id"] for entry in catalog["objects"]] == ["Alpha", "fixture1"]
+
+    store = review_server.ReviewStore(review_root)
+    store.save("fixture1", 1, _payload(store, transcription="Zweite Lesung"))
+    saved = {path: path.read_bytes() for path in (review_root / "docs/data").rglob("*")}
+    assert step6.build_all()[0] == []
+    assert saved == {
+        path: path.read_bytes() for path in (review_root / "docs/data").rglob("*")
+    }

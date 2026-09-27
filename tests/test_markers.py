@@ -11,6 +11,7 @@ from conftest import load_step
 
 markers = load_step("markers")
 step4 = load_step("04_validate")
+step5 = load_step("05_annotate_tei")
 
 
 def _words(text: str) -> str:
@@ -71,3 +72,19 @@ def test_combined_illegible_group_matches_the_shared_marker():
     for text in ("[...]", "[... ~3 char]", "[...~ 40 chars]"):
         assert markers.MARKER_PATTERN.fullmatch(text)["illegible"] == text
         assert re.fullmatch(markers.ILLEGIBLE, text)
+
+
+def test_step5_maps_markers_with_the_shared_pattern():
+    assert step5.MARKER_PATTERN is markers.MARKER_PATTERN
+
+
+def test_spaced_illegible_extent_survives_the_tei_round_trip(fixture_validated):
+    page = fixture_validated["pages"][0]
+    page["transcription"] = "Anfang [...~ 40 chars] und ~~alt~~ {neu} Wort[?]"
+    page["foreign_paragraphs"] = []
+
+    xml = step5.generate_tei("fixture1", fixture_validated, {})
+
+    assert '<gap reason="illegible" quantity="40" unit="character"/>' in xml
+    report = step5.validate_tei(xml, fixture_validated["pages"])
+    assert report["plaintext_exact"], report["mismatched_pages"]

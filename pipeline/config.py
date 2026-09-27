@@ -18,7 +18,7 @@ import re
 import stat
 import sys
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,7 +38,6 @@ SOURCE_IMAGES_DIR = SOURCES_DIR / "images"
 IMAGES_DIR = PROCESSED_DIR / "images"
 TRANSCRIPTIONS_DIR = PROCESSED_DIR / "transcriptions"
 VALIDATED_DIR = PROCESSED_DIR / "validated"
-TEI_DIR = PROCESSED_DIR / "tei"
 CHUNK_CACHE_DIR = PROCESSED_DIR / "chunk-cache"
 LLM_CALLS_DIR = PROCESSED_DIR / "llm-calls"
 INVENTORY_PATH = DATA_DIR / "inventory.json"
@@ -57,7 +56,7 @@ DOCS_TEI_DIR = DOCS_DIR / "tei"
 # Per-fork choice (ADR-005): the RelaxNG schema the project validates
 # against (TEI All, DTABf or an own RNG, see schemas/README.md). TEI All is
 # the default because the deterministic generator's output validates against
-# it as shipped; DTABf (basisformat.rng) needs an adapted header first.
+# it as shipped; DTABf is not shipped and needs an adapted header first.
 VALIDATION_SCHEMA = SCHEMAS_DIR / "tei_all.rng"
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -116,7 +115,6 @@ def ensure_dirs() -> None:
         IMAGES_DIR,
         TRANSCRIPTIONS_DIR,
         VALIDATED_DIR,
-        TEI_DIR,
         RESULTS_TEI_DIR,
         RESULTS_REPORTS_DIR,
         DOCS_DATA_DIR,
@@ -503,6 +501,41 @@ class ItemFailure(Exception):
         super().__init__(message)
         self.stage = stage
         self.message = message
+
+
+def load_checked_json(
+    directory: Path,
+    object_id: str,
+    violations: Callable[[object], list[str]],
+) -> dict:
+    """Read directory/{object_id}.json after checking the ID, then its contract.
+
+    violations is the contract check for this input stage, for example
+    contract.file_violations or contract.validated_file_violations. The file's
+    own object_id must equal the requested one. Raises ItemFailure with stage
+    "contract" for an unsafe ID or a violated contract and stage "read" for a
+    missing, unreadable or non-JSON file; the path is built only after the ID
+    has been checked.
+    """
+    if not contract.valid_object_id(object_id):
+        raise ItemFailure("contract", "object_id is not a path-safe identifier")
+    path = directory / f"{object_id}.json"
+    if not path.is_file():
+        raise ItemFailure("read", f"Input not found: {path}")
+    try:
+        data = read_json(path)
+    except (OSError, ValueError) as exc:
+        raise ItemFailure("read", str(exc)) from exc
+    problems = list(violations(data))
+    if isinstance(data, dict) and data.get("object_id") != object_id:
+        problems.append(
+            f"object_id {data.get('object_id')!r} does not match filename {object_id!r}"
+        )
+    if problems:
+        raise ItemFailure(
+            "contract", "Input violates the data contract: " + "; ".join(problems)
+        )
+    return data
 
 
 def _positive_int(value: str) -> int:

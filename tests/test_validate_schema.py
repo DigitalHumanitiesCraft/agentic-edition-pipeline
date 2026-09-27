@@ -85,9 +85,7 @@ def test_missing_schema_fails_with_pointer(tmp_path):
     assert "VALIDATION_SCHEMA" in str(exc.value)
 
 
-def test_offline_path_produces_tei_valid_against_the_default_schema(
-    monkeypatch, tmp_path
-):
+def test_offline_path_produces_tei_valid_against_the_default_schema(tmp_path):
     """Fixture into data/processed/transcriptions/, then steps 4 and 5.
 
     This is the path a fork walks without any API key: a contract-conformant
@@ -96,7 +94,7 @@ def test_offline_path_produces_tei_valid_against_the_default_schema(
     """
     dirs = {
         name: tmp_path / name
-        for name in ("transcriptions", "validated", "tei", "results_tei", "reports")
+        for name in ("transcriptions", "validated", "results_tei", "reports")
     }
     for path in dirs.values():
         path.mkdir()
@@ -104,15 +102,22 @@ def test_offline_path_produces_tei_valid_against_the_default_schema(
         FIXTURES / "transcription.json", dirs["transcriptions"] / "synthetic1.json"
     )
 
-    monkeypatch.setattr(step4, "TRANSCRIPTIONS_DIR", dirs["transcriptions"])
-    monkeypatch.setattr(step4, "VALIDATED_DIR", dirs["validated"])
-    assert step4.validate_one("synthetic1", use_llm=False, force=True) is None
-
-    monkeypatch.setattr(step5, "VALIDATED_DIR", dirs["validated"])
-    monkeypatch.setattr(step5, "TEI_DIR", dirs["tei"])
-    monkeypatch.setattr(step5, "RESULTS_TEI_DIR", dirs["results_tei"])
-    monkeypatch.setattr(step5, "RESULTS_REPORTS_DIR", dirs["reports"])
-    assert step5.annotate_one("synthetic1", {}, validate_only=False, force=True) is None
+    step4.validate_one(
+        "synthetic1",
+        None,
+        force=True,
+        transcriptions_dir=dirs["transcriptions"],
+        validated_dir=dirs["validated"],
+    )
+    step5.annotate_one(
+        "synthetic1",
+        {},
+        validate_only=False,
+        force=True,
+        validated_dir=dirs["validated"],
+        tei_dir=dirs["results_tei"],
+        reports_dir=dirs["reports"],
+    )
 
     tei_path = dirs["results_tei"] / "synthetic1.xml"
     assert json.loads(

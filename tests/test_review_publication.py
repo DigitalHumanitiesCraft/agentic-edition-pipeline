@@ -24,6 +24,9 @@ def test_pending_transaction_blocks_publication(tmp_path, monkeypatch):
 
 def test_annotations_need_verifiable_current_binding(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        config, "TRANSCRIPTIONS_DIR", tmp_path / "data/processed/transcriptions"
+    )
     tei = tmp_path / "doc.xml"
     tei.write_text(
         '<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><revisionDesc status="accepted"/></teiHeader></TEI>',
