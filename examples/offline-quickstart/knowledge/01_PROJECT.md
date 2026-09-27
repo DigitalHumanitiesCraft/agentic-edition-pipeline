@@ -12,8 +12,12 @@ tags: [project, example]
 | Institution | Digital Humanities Craft |
 | Editor | Example Editorial Team |
 | Edition type | Diplomatic transcription |
-| Language | English |
+| Language | en |
 | License | CC BY 4.0 |
+
+## Language
+
+The Language value is the BCP 47 code `en`. Both example documents also declare `en` in their own metadata, which takes precedence.
 
 ## Research question
 

@@ -1,85 +1,96 @@
 ---
-title: Editionsrichtlinien
-description: Transkriptionskonventionen, Normalisierungen, Annotationstypen
-tags: [context, guidelines, transcription]
+title: Editorial guidelines
+description: Transcription conventions, normalisations, annotation types, permitted model context and reference formation of the edition
+tags: [context, guidelines, transcription, edition-configuration]
+project:
+  name: agentic-edition-pipeline
+  repository: https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline
+method:
+  name: Promptotyping
+  url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
+status: stub
+created: 2026-04-03
+updated: 2026-09-27
 ---
 
-# Editionsrichtlinien
+# Editorial guidelines
 
-## Transkriptionskonventionen
+The editorial guidelines state the rules that transcription, quality assessment and review apply to this corpus. The transcription markers themselves have a fixed syntax, defined in `pipeline/markers.py` and mapped to TEI as the [TEI base mapping](../reference/tei-mapping.md) describes. The edition decides whether and how it uses them.
 
-[TODO: Welche Regeln gelten fuer die Transkription?]
+## Transcription conventions
 
-| Aspekt | Konvention |
+[TODO: Which rules apply to the transcription?]
+
+| Aspect | Convention |
 |---|---|
-| Zeilenumbrueche | [beibehalten / normalisieren] |
-| Abkuerzungen | [aufloesen / beibehalten / kennzeichnen] |
-| Unsichere Lesungen | `[?]` nach dem Wort (Standard) |
-| Unleserliches | `[...]` mit optionaler Zeichenzahl (Standard) |
-| Durchstreichungen | `~~text~~` (Standard) |
-| Einfuegungen | `{text}` (Standard) |
-| Orthographie | [beibehalten / normalisieren] |
-| Interpunktion | [beibehalten / normalisieren] |
-| Grossschreibung | [beibehalten / normalisieren] |
+| Line breaks | [keep / normalise] |
+| Abbreviations | [expand / keep / mark] |
+| Uncertain readings | `word[?]`, fixed marker syntax |
+| Illegible passages | `[...]` or `[... ~N chars]`, fixed marker syntax |
+| Strikethrough | `~~text~~`, fixed marker syntax |
+| Insertions | `{text}`, fixed marker syntax |
+| Orthography | [keep / normalise] |
+| Punctuation | [keep / normalise] |
+| Capitalisation | [keep / normalise] |
 
-## Normalisierungen
+## Normalisations
 
-[TODO: Nur relevant wenn Editionstyp = normalisiert. Welche Normalisierungen werden angewandt?]
+[TODO: Only for a normalised edition type. Which normalisations apply?]
 
-## Sprachen und Schrifttypen
+## Scripts
 
-[TODO: Welche Schrifttypen kommen vor?]
+[TODO: Which scripts occur?]
 
-- [ ] Handschrift (lateinisch)
-- [ ] Kurrentschrift
-- [ ] Druckschrift (Antiqua)
+- [ ] Handwriting in Latin script
+- [ ] Kurrent
+- [ ] Printed Antiqua
 - [ ] Fraktur
-- [ ] Mischformen
+- [ ] Mixed forms
 
-## Besonderheiten
+## Special cases
 
-[TODO: Spezifische Konventionen fuer dieses Korpus, z.B. Umgang mit Stempeln, Marginalien, eingeklebten Elementen]
+[TODO: Corpus-specific conventions, for example for stamps, marginalia or pasted-in elements.]
 
-## Annotationstypen
+## Annotation types
 
-Welche Entitaeten und Strukturen sollen im TEI ausgezeichnet werden?
+[TODO: Which entities and structures should be marked up in TEI?]
 
-- [ ] Personen (`persName`)
-- [ ] Orte (`placeName`)
-- [ ] Organisationen (`orgName`)
-- [ ] Daten (`date`)
-- [ ] Bibliographische Referenzen (`bibl`)
-- [ ] Sonstiges: [TODO]
+- [ ] Persons (`persName`)
+- [ ] Places (`placeName`)
+- [ ] Organisations (`orgName`)
+- [ ] Dates (`date`)
+- [ ] Bibliographic references (`bibl`)
+- [ ] Other ([TODO])
 
-## Normdaten
+## Authority data
 
-[TODO: Sollen Entitaeten mit Normdaten verknuepft werden?]
+[TODO: Should entities be linked to authority data?]
 
 - [ ] GND (Gemeinsame Normdatei)
 - [ ] Wikidata
-- [ ] VIAF
-- [ ] Geonames
-- [ ] Keine Normdaten
-- [ ] Sonstiges: [TODO]
+- [ ] VIAF (Virtual International Authority File)
+- [ ] GeoNames
+- [ ] No authority data
+- [ ] Other ([TODO])
 
-## Vorbild oder Referenzedition
+## Model or reference edition
 
-[TODO: Gibt es eine bestehende Edition als Vorbild? Ein Kodierungshandbuch? Institutionelle Vorgaben?]
+[TODO: Is there an existing edition to follow, an encoding manual or institutional guidance?]
 
-## Zulässiger Modellkontext
+## Permitted model context
 
-[TODO: Vor einem Lauf festlegen, welche Informationen das Modell zusätzlich zum Bild erhalten darf.]
+[TODO: Decide before a run which information the model may receive in addition to the image.]
 
-Mögliche Informationsquellen sind Katalogmetadaten, frühere Transkriptionen und objektspezifische Hinweise. Schritt 3 fügt ausgewählte Metadaten bereits automatisch zum Prompt hinzu. Die Ausgabe ist damit gegebenenfalls metadatenunterstützt. Eine ausschließlich bildbasierte Versuchsbedingung benötigt eine dokumentierte Anpassung des ausgeführten Prompts.
+Possible sources are catalogue metadata, earlier transcriptions and object-specific hints. Step 3 already adds the title, signature, date, language, object type and extent from the inventory to the prompt, so its output can be metadata-assisted. An experimental condition based on the image alone needs a documented adaptation of the executed prompt.
 
-Die genaue Promptfassung und ihre Eingaben sind für die Bewertung maßgeblich. Übereinstimmung mit einer mitgelieferten Signatur belegt für sich keine korrekte Bildlesung. Ein Einfluss des Kontexts ist durch einen kontrollierten Vergleich zu untersuchen; aus einem einzelnen passenden oder widersprüchlichen Wert folgt kein Kausalnachweis.
+The exact prompt and its inputs govern the assessment. Agreement with a supplied shelfmark does not by itself prove a correct reading of the image. The influence of context needs a controlled comparison, and a single matching or contradicting value establishes no causal effect.
 
-## Quellenvergleich und Referenzbildung
+## Source comparison and reference formation
 
-[TODO: Verantwortliche, Seitenumfang und Verfahren der fachlichen Prüfung festlegen.]
+[TODO: Responsible roles, page scope and procedure of the scholarly review.]
 
-Für eine unabhängige Erstlesung wird das Bild vor dem Modelltext betrachtet und die Lesung vor dem Vergleich festgehalten. Eine eigene Blindprüfungsfunktion ist im Basisfrontend noch nicht vorhanden.
+For an independent first reading, the reviewer looks at the image before the model text and records the reading before the comparison. The base frontend offers no dedicated blind-review mode.
 
-Eine gespeicherte Nutzerkorrektur dokumentiert einen Eingriff. Für ihre Verwendung als Evaluationsreferenz müssen Prüfung und Reife des Referenztexts feststehen. Unaufgelöste Lesungen bleiben gekennzeichnet.
+A stored user correction documents an intervention. Its use as an evaluation reference requires that review and maturity of the reference text are settled. Unresolved readings stay marked.
 
-Modellkonfidenz und automatische Plausibilitätsbewertung sind Einschätzungen des jeweiligen Verfahrens. Sie sind keine gemessenen Fehlerraten. Frühere Notizen werden nach Textänderungen auf ihren Geltungsbereich geprüft. Herkunft und Grenzen der Videobeobachtungen stehen in der [Evaluationsreferenz](../reference/evaluation.md).
+Model confidence and the automatic plausibility assessment are estimates of the respective procedure and no measured error rates. Earlier notes are checked for their scope after text changes. The [evaluation reference](../reference/evaluation.md) states the origin and limits of the video observations.

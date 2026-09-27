@@ -1,77 +1,55 @@
 # Agentic Edition Pipeline
 
-> **Research Preview (v0.10.0)**
->
-> This project is under active development and is not yet a stable release.
+> Research preview, version 0.10.0. The template is under active development and has no stable release yet.
 
-A forkable repository template for digital edition workflows with an AI harness. It combines reusable project knowledge and processing tools for transcription, TEI-XML generation and review interfaces, with adaptable models and methods.
+A forkable repository template for digital edition workflows operated with an AI harness, the working environment in which an agent reads the repository, runs tools and changes files. The template combines a knowledge base for the edition's decisions with Python scripts, prompts and data contracts for image transcription, quality assessment, TEI-XML generation, local correction and static publication.
 
-The supplied deterministic workflow and local correction service have automated tests. Transcription quality, project-specific annotations and scholarly acceptance require evidence from the individual edition.
+The deterministic workflow and the local correction service have automated tests. Transcription quality, project-specific annotations and scholarly acceptance need evidence from the individual edition, as described in the [evaluation reference](reference/evaluation.md).
 
-## What it is
+## Quickstart
 
-The repository provides Python scripts, prompts, data contracts and a knowledge base. An AI harness is the working environment in which an agent can read those files, use tools and modify the project. Its agent uses the repository context to adapt and operate an edition workflow.
-
-The knowledge documents record source descriptions, editorial conventions, modelling decisions and verification requirements. They make project choices available across sessions and tools. Adding a requirement to a document still requires implementation and testing where the supplied code does not support it.
-
-## Use it for your own edition
-
-Create your own copy of the [repository](https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline), open it in your AI harness and ask the agent to read [AGENTS.md](AGENTS.md). Define your sources, editorial requirements and processing methods using [SETUP.md](SETUP.md).
-
-The [video tutorial](https://youtu.be/krL-xMxTa_c), *Agentic Edition Pipeline mit GPT-6 Astra | Live-Demo*, demonstrates adaptation and review on historical documents. It records a development session; current capabilities are documented here.
-
-To try the deterministic workflow without an API key or research data, install Python 3.11+ and [uv](https://docs.astral.sh/uv/), then run:
+With Python 3.11+ and [uv](https://docs.astral.sh/uv/) installed, build a synthetic edition without an API key, network access or research data:
 
 ```console
 uv run python examples/offline-quickstart/run.py
 ```
 
-This creates an isolated synthetic edition. See the [quickstart guide](examples/offline-quickstart/README.md) for previewing it and the exact verification scope.
+The [quickstart guide](examples/offline-quickstart/README.md) explains the isolated workspace, the preview command and what the run verifies.
 
-## Models and methods
-
-The model in the AI harness and the models used for document processing are independent choices. The supplied processing adapters support Gemini, OpenAI, Anthropic and Ollama. Choose a compatible model and configure access for each task.
-
-Other frontier models, local models, specialist OCR/HTR systems and machine-learning methods can be integrated through adapters or format converters. They must satisfy the relevant input, output and provenance contracts. The architecture supports these substitutions; the repository does not include every integration.
-
-The current implementation uses Python and native JavaScript. Base TEI generation is deterministic. Named entities, authority links and document-specific layout structures need an explicitly implemented extension.
+For a real edition, fork the [repository](https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline) and follow [SETUP.md](SETUP.md). The [video tutorial](https://youtu.be/krL-xMxTa_c) *Agentic Edition Pipeline mit GPT-6 Astra | Live-Demo* records an earlier development session with adaptation and review on historical documents. The documentation here describes the current state.
 
 ## Workflow components
 
-Use the components that match your inputs. The script numbers describe the supplied processing path.
+Each component can be used on its own when the inputs match. The script numbers name the supplied processing path.
 
-| Task | Supplied component | Dependency |
+| Task | Supplied component | Input |
 |---|---|---|
-| Prepare page images | PDF extraction or remote-image download | Ordered source pages |
+| Prepare page images | PDF rasterization or remote-image download | Ordered source pages |
 | Inventory the corpus | Source and metadata inventory | Declared document boundaries |
-| Transcribe | Image-based OCR/HTR | Checked inventory, images and evaluated prompt |
-| Assess text quality | Rules and optional text-only model assessment | Contract-conformant transcription JSON |
-| Generate base TEI | Deterministic mapping and text-preservation checks | Current quality assessment and project configuration |
-| Inspect and correct | Static viewer and optional local write service | Generated edition data |
-| Publish | Schema and review-state gates, static site build | Rights clearance and human acceptance |
+| Transcribe | Image-based OCR/HTR through a Large Language Model (LLM) provider | Inventory, page images and a tested prompt |
+| Assess text quality | Rules and an optional text-only LLM judge | Transcription JSON under the data contract |
+| Generate base TEI | Deterministic mapping with a text-preservation check | Current quality assessment and project fields |
+| Inspect and correct | Static viewer and a local write service | Generated edition data |
+| Publish | Publication gate and static site build on GitHub Pages | Rights clearance and human acceptance |
 
-Existing transcription JSON can enter at quality assessment. Existing checked TEI can enter at the frontend build. Other input formats require conversion. Review-interface requirements should be defined with the first sample and refined as errors become visible.
+Existing transcription JSON enters at quality assessment and existing checked TEI at the frontend build. Other formats need a converter. The [processing reference](reference/pipeline.md) lists commands, options and outputs.
 
-A correction changes the transcription state and requires dependent outputs to be regenerated or rechecked. [Processing reference](reference/pipeline.md) documents commands, dependencies and limits.
+## Models and methods
 
-## Capabilities and limits
+The model that runs the AI harness and the models the processing scripts call are configured independently. The supplied adapters connect Gemini, OpenAI, Anthropic and Ollama, and other LLMs, specialist OCR/HTR engines or machine-learning methods enter through an adapter or format converter that satisfies the same data and provenance contracts. Base TEI generation calls no model. Named entities, authority links and document-specific layout need an explicitly implemented extension.
 
-The frontend displays facsimiles beside text, review states, provenance and TEI downloads. The optional local service writes version-checked corrections into repository files, preserves raw text and records changes and proposals. It does not commit or push them.
-
-GitHub Pages serves the read-only edition. Repository writes require the local service. Actor labels in that service are self-declared within a trusted local session; it is not a multi-user authentication system.
-
-Formal XML validity, text preservation, transcription accuracy and scholarly acceptance are separate checks. Model confidence and automatic quality labels do not grant acceptance. Layout reconstruction, entity resolution, image-first blind review and project annotation editors require further implementation.
+The frontend shows facsimiles beside the text, review states, provenance and TEI downloads. GitHub Pages serves it read-only. Corrections go through the local service, which writes version-checked changes into the repository files and leaves committing, pushing and acceptance to the responsible people.
 
 ## Documentation
 
-- [Setup and entry points](SETUP.md)
+- [Setup for an edition](SETUP.md)
 - [Agent working contract](AGENTS.md) and [knowledge index](knowledge/00_INDEX.md)
 - [Processing reference](reference/pipeline.md) and [evaluation reference](reference/evaluation.md)
-- [Data contract](knowledge/08_DATA_CONTRACT.md), [local corrections](knowledge/local-review.md) and [provider records](knowledge/provider-records.md)
-- [Schema selection](schemas/README.md) and [current requirements](knowledge/specification.md)
+- [Data contract](reference/data-contract.md), [base TEI mapping](reference/tei-mapping.md), [local corrections](reference/local-review.md) and [provider records](reference/provider-records.md)
+- [Schema selection](schemas/README.md) and [template overview](knowledge/template/overview.md)
 
 ## Licence and citation
 
-Code is licensed under the [MIT License](LICENSE). Documentation and knowledge documents are licensed under CC BY 4.0. Third-party research data retains its own rights.
+Code is licensed under the [MIT License](LICENSE). Documentation and knowledge documents are licensed under CC BY 4.0. Third-party research data keeps its own rights.
 
-Created by [Christopher Pollin](https://github.com/chpollin), [Digital Humanities Craft](https://github.com/DigitalHumanitiesCraft). Use [CITATION.cff](CITATION.cff) to cite the repository.
+Created by [Christopher Pollin](https://github.com/chpollin), [Digital Humanities Craft](https://github.com/DigitalHumanitiesCraft). Cite the repository with [CITATION.cff](CITATION.cff).

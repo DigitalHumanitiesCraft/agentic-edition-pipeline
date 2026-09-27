@@ -1,98 +1,53 @@
 ---
-title: TEI-Mapping
-description: Zuordnung von Quellstrukturen zu TEI-Elementen, Schema-Profil
-tags: [tei, mapping, schema, dtabf]
+title: TEI mapping decisions
+description: Schema profile, additional structures, annotation rules and registers of the edition
+tags: [tei, mapping, schema, edition-configuration]
+project:
+  name: agentic-edition-pipeline
+  repository: https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline
+method:
+  name: Promptotyping
+  url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
+status: stub
+created: 2026-04-03
+updated: 2026-09-27
 ---
 
-# TEI-Mapping
+# TEI mapping decisions
 
-## TEI-Profil
+Step 5 produces the fixed base mapping of header, body, markers and stored corrections described in the [TEI base mapping](../reference/tei-mapping.md). The decisions below extend it for this edition. A decision recorded here changes no output until the renderer or a separate, documented stage implements it with tests.
 
-Der Fork legt sein Validierungsziel in `pipeline/config.py` fest. `schemas/tei_all.rng` ist das lauffähige Ausgangsprofil des Templates. `schemas/basisformat.rng` ist das mitgelieferte strengere DTA-Basisformat-Schema; seine Nutzung erfordert einen angepassten Header.
+## TEI profile
 
-[TODO: Projektprofil, ODD oder RelaxNG-Schema festlegen und die Auswahl in [[decisions]] begründen.]
+[TODO: Choose the project profile, ODD or RelaxNG schema, set `VALIDATION_SCHEMA` in `pipeline/config.py` and justify the choice in [[decisions]].]
 
-## Header-Mapping
+`schemas/tei_all.rng` is the runnable default of the template. The DTA base format (DTABf) of the Deutsches Textarchiv is not shipped, and adopting it requires an adapted header. The [schema documentation](../schemas/README.md) names its sources and the known header deviations.
 
-Zuordnung von Projektmetadaten zu TEI-Header-Elementen. Quellen sind die Knowledge-Dokumente und die Dokumentmetadaten.
+## Additional structures
 
-| Metadatenfeld | TEI-Element | Quelle |
-|---|---|---|
-| Dokumenttitel | `titleStmt/title` | Dokumentmetadaten `title`, Fallback `object_id` |
-| Herausgeber | `titleStmt/editor` | [[01_PROJECT]] |
-| Verlag/Institution | `publicationStmt/publisher` | [[01_PROJECT]] |
-| Lizenz | `publicationStmt/availability/licence` | [[01_PROJECT]] |
-| Signatur | `msIdentifier/idno[@type='shelfmark']` | Dokumentmetadaten `signature` |
-| Objekt-ID | `msIdentifier/idno[@type='object-id']` | `object_id` |
-| Repository | `msIdentifier/repository` | Dokumentmetadaten |
-| Sprache | `profileDesc/langUsage/language` | Dokumentmetadaten `language`, Fallback `de` |
-| Datum | `history/origin/origDate` | Dokumentmetadaten |
+[TODO: Structures of the edition beyond the base mapping, each with its evidence and rule.]
 
-## Body-Mapping
-
-Der deterministische Basispfad bildet die folgenden Strukturen ab.
-
-| Quellelement | TEI-Element | Regeln |
-|---|---|---|
-| Absatz | `<p>` | Doppelzeilenumbruch trennt Absaetze |
-| Seitenumbruch | `<pb/>` | Pro Faksimile-Bild, mit `@n` und `@facs` |
-| Zeilenumbruch | `<lb/>` | Nur bei diplomatischer Transkription |
-| Fremdtextseite | `<note type="foreign">` | Nur bei entsprechendem `page_type` |
-| Gesperrte Seite | `<note type="gate" subtype="low_resolution">` | Nur bei entsprechendem `page_type` |
-| Leere Seite | `<note type="empty">` | Leerer Text ohne deklarierten Seitentyp |
-| Geloeschter Text `~~text~~` | `<del>text</del>` | Marker wird beim Rundlauf exakt rekonstruiert |
-| Einfuegung `{text}` | `<add>text</add>` | Marker wird beim Rundlauf exakt rekonstruiert |
-| Unsichere Lesung `word[?]` | `<unclear>word</unclear>` | Marker wird beim Rundlauf exakt rekonstruiert |
-| Unleserliche Stelle `[...]` | `<gap reason="illegible"/>` | Optionaler Umfang aus `[... ~N chars]` |
-| Fremdabsatz | `<note type="foreign">` | 0-basierter Index in `foreign_paragraphs` |
-
-Weitere Strukturen werden hier spezifiziert und anschließend im deterministischen Renderer oder in einer getrennten Stufe implementiert. Ein Eintrag in dieser Tabelle allein verändert keine Ausgabe.
-
-| Projektstruktur | TEI-Element | Beleg und Regel |
+| Project structure | TEI element | Evidence and rule |
 |---|---|---|
 | [TODO] | [TODO] | [TODO] |
 
-## Gespeicherte Korrekturen
+## Project-specific annotation rules
 
-Der Basispfad bildet `pages[].edits` als `revisionDesc/change[@type='transcription-correction']` ab. `@when` nennt den Zeitpunkt, `@subtype` die angegebene Rolle und `@who` verweist auf ein `respStmt` mit dem Bearbeiternamen. `@target` verweist auf die betroffene Seite. Der Änderungsgrund steht im Elementtext. Vorher-/Nachher-Werte bleiben im kanonischen JSON. Ungespeicherte Vorschläge erzeugen keine TEI-Ereignisse. Eine neue Ableitung und eine fachliche Freigabe behalten getrennte Bedeutungen.
+[TODO: Semantic annotations of the edition and their attested rules. Step 5 does not read this section. The edition implements the rules deterministically or as its own documented and tested extension stage.]
 
-## Projektspezifische Annotationsregeln
+The claims an annotation makes and the evidence each needs are listed in the [TEI base mapping](../reference/tei-mapping.md#claims-of-semantic-annotation).
 
-[TODO: Projektspezifische semantische Annotationen und ihre belegten Regeln definieren. Schritt 5 konsumiert diesen Abschnitt nicht automatisch. Der Fork implementiert die Regeln deterministisch oder als eigene dokumentierte und geprüfte Erweiterungsstufe.]
+## Modelling decisions before annotation
 
-Ein Formatbeispiel wie `<persName ref="GND-URI">` setzt eine geprüfte Identität und einen belegten Normdatenbezug voraus. Das Beispiel ist keine Anweisung zur automatischen Vergabe von Identifikatoren. Datumsnormalisierung und Werkidentifikation benötigen eigene Regeln.
+[TODO: Confirm inline or stand-off model, permitted categories, references and checking rules.]
 
-## Register
+Inline markup marks a passage in the text body. Stand-off markup keeps the annotation separate and binds it to text passages through explicit references. The choice depends on overlaps, editing and the required outputs. An agent's proposal becomes a project profile only after documented scholarly confirmation.
 
-[TODO: Welche Register soll die Edition enthalten? Das Basisfrontend aggregiert derzeit keine semantischen Register. Der Fork implementiert die Datenprojektion und Oberfläche gegen die bestätigten Annotationen.]
+## Registers
 
-- [ ] Personenregister (aus `persName`)
-- [ ] Ortsregister (aus `placeName`)
-- [ ] Sachregister
-- [ ] Werkverzeichnis (aus `bibl`)
+[TODO: Which registers should the edition contain? The base frontend aggregates no semantic registers. The edition implements the data projection and interface against the confirmed annotations.]
 
-## Modellierungsentscheidungen vor der Annotation
-
-[TODO: Inline- oder Stand-off-Modell, erlaubte Kategorien, Referenzen und Prüfregeln bestätigen.]
-
-Inline-Auszeichnung markiert eine Stelle im Textkörper. Stand-off-Auszeichnung führt die Annotation getrennt und bindet sie über explizite Verweise an Textstellen. Die Wahl richtet sich nach Überlappungen, Bearbeitung und den benötigten Ausgaben. Eine Agentenentscheidung erhält erst nach dokumentierter fachlicher Bestätigung den Status eines Projektprofils.
-
-Bei semantischen Annotationen sind unterschiedliche Aussagen zu prüfen:
-
-| Aussage | Erforderlicher Beleg |
-|---|---|
-| Erwähnung | Exakter Text und die richtige Fundstelle |
-| Entitätsidentität | Begründete Zusammenführung unterschiedlicher Namensformen |
-| Rolle | Belegte Funktion im jeweiligen Dokumentkontext |
-| Beziehung | Nachvollziehbare Verbindung zwischen den beteiligten Entitäten |
-| Normdatenlink | Passender externer Datensatz und dokumentierte Disambiguierung |
-
-Mehrere Bezeichnungen eines Werks können dieselbe Entität meinen. Dokumentlokale IDs erlauben keine Aussage über die Zahl verschiedener Personen oder Werke im Gesamtkorpus. Ein formal gültiger Anker bestätigt weder Identität noch Rolle.
-
-Tabellen, Spalten und typografische Gruppen können Beziehungen zwischen Personen, Werken und Funktionen tragen. Diese Layoutbeziehungen sind vor einer verlustbehafteten Linearisierung zu erfassen, wenn sie für das Editionsziel benötigt werden. Der Basisrenderer rekonstruiert sie nicht.
-
-## Reife einer TEI-Datei
-
-Ein erzeugtes TEI-Dokument ist zunächst ein Kandidat. Wohlgeformtheit, RelaxNG-Konformität und Textbewahrung sind technische Prüfungen. Als fachlich abgenommen gilt nur der entsprechend geprüfte und ausdrücklich bestätigte Stand. Die Benennung einer Datei oder eines Ordners als `final` bestätigt diese Reife nicht.
-
-Nach Textkorrekturen müssen Textanker und abhängige Befunde erneut geprüft werden. [[local-review]] beschreibt den Schutz angereicherter TEI im bestehenden Korrekturweg.
+- [ ] Person register (from `persName`)
+- [ ] Place register (from `placeName`)
+- [ ] Subject register
+- [ ] List of works (from `bibl`)

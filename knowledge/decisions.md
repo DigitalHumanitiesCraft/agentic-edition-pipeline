@@ -1,134 +1,398 @@
 ---
-title: Architekturentscheidungen
-description: Architecture Decision Records im ADR-Format
+title: Decisions
+description: Architecture decision records of the template and of the edition built from it
 tags: [decisions, architecture]
+project:
+  name: agentic-edition-pipeline
+  repository: https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline
+method:
+  name: Promptotyping
+  url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
+status: active
+created: 2026-04-03
+updated: 2026-09-27
 ---
 
-# Architekturentscheidungen
+# Decisions
 
-Dokumentation aller Architektur- und Designentscheidungen im ADR-Format. Claude Code traegt hier ein, wenn Pipeline-Skripte modifiziert oder Designentscheidungen getroffen werden.
+Architecture and design decisions are recorded here as architecture decision records (ADR). The agent adds a record when a pipeline script changes or a design decision is taken. A fork keeps the template's records and appends its own below a heading that names the fork, as [[00_INDEX]] describes.
 
 ## Format
 
 ```
-### ADR-NNN Titel
+### ADR-NNN Title (YYYY-MM-DD)
 
-**Datum:** YYYY-MM-DD
-**Kontext:** Was ist die Ausgangslage?
-**Entscheidung:** Was wurde entschieden?
-**Begruendung:** Warum?
-**Alternativen:** Was wurde verworfen und warum?
+#### Context
+What is the starting situation?
+
+#### Decision
+What was decided?
+
+#### Rationale
+Why?
+
+#### Alternatives
+What was rejected, and why?
 ```
 
-## Entscheidungen
+## Template decisions
 
-### ADR-001 Zweisprachige Dokumentation
+### ADR-001 Bilingual documentation (2026-07-17)
 
-**Datum:** 2026-07-17
-**Kontext:** Das Template traegt Dokumentation in zwei Sprachen. README und SETUP sind englisch, damit das forkbare Repo fuer ein internationales Publikum zugaenglich ist. Die Wissensdokumente im `knowledge/`-Ordner sind deutsch, weil sie die Promptotyping-Wissensbasis der deutschsprachigen Ausgangsprojekte fortschreiben.
-**Entscheidung:** Die Doku-Sprache bleibt zweisprachig. README und SETUP werden englisch gepflegt, die Wissensdokumente in `knowledge/` deutsch. Keine Vereinheitlichung auf eine Sprache.
-**Begruendung:** Die beiden Sprachen bedienen zwei verschiedene Adressaten. Das englische README/SETUP richtet sich an Fork-Nutzende, das deutsche `knowledge/` an den Agent und an das deutschsprachige Editionsteam, das die Wissensbasis fuellt. Eine Vereinheitlichung wuerde einen der beiden Adressaten schlechter bedienen.
-**Alternativen:** Vollstaendige Umstellung auf Englisch verworfen, weil die Wissensbasis konzeptuell an die deutschsprachigen Quellprojekte anschliesst und das Editionsteam deutsch arbeitet. Vollstaendige Umstellung auf Deutsch verworfen, weil das die internationale Forkbarkeit des Templates einschraenkt.
+Superseded by ADR-014.
 
-### ADR-002 Ein Datenvertrag, API-Key-Gate statt Import-Modus
+#### Context
 
-**Datum:** 2026-07-18
-**Kontext:** Die beiden Fork-Testlaeufe fanden drei Schluesselvarianten fuer denselben Seitentext (`transcription` im Prompt und in Schritt 4/5, `text` in den Quality-Signals, verschachtelte `pages` in Schritt 3) sowie stillen Metadaten-Verlust in Schritt 4. Zusaetzlich fehlte ein deklarierter Pfad fuer Transkriptionen, die ohne Provider-Key entstehen.
-**Entscheidung:** Ein einziger Datenvertrag ([[08_DATA_CONTRACT]]): `pages` auf oberster Ebene, Seitentext unter `transcription`, Objektmetadaten unter `metadata`, von Schritt 3 bis 6 unveraendert durchgereicht. Jede Stufe mit Provider-Aufruf prueft den API-Key am Start und bricht mit klarer Meldung ab. Es gibt keinen Import-Modus in Schritt 3; extern erzeugte Transkriptionen werden vertragskonform direkt nach `data/processed/transcriptions/` geschrieben.
-**Begruendung:** Schritt 4 und 5 erwarteten den flachen Vertrag bereits; die Anpassung von Schritt 3 ist der kleinste Eingriff. Ein Import-Modus wuerde eine zweite Eingangstuer mit eigener Validierungslogik schaffen, waehrend der dokumentierte Vertrag dieselbe Faehigkeit ohne Code liefert. Stilles Weiterlaufen ohne Key erzeugte in den Testlaeufen leere Ergebnisse ohne Fehlermeldung.
-**Alternativen:** `--import`-Flag fuer Schritt 3 verworfen (zweiter Codepfad fuer denselben Vertrag). Nachladen der Metadaten in Schritt 5 aus `transcriptions/` verworfen, weil das Durchreichen in Schritt 4 den Vertrag durchgaengig haelt.
+The template carried documentation in two languages. README and SETUP were English, so that the forkable repository stayed accessible to an international audience. The knowledge documents in `knowledge/` were German, because they continued the Promptotyping knowledge base of the German-language source projects.
 
-### ADR-003 Zentrale Bildwurzel-Aufloesung und Remote-Faksimiles
+#### Decision
 
-**Datum:** 2026-07-18
-**Kontext:** Die Bildpfad-Aufloesung war pro Skript dupliziert und inkonsistent (Schritt 6 pruefte nur `data/processed/images/`, Schritt 3 bevorzugte sie); vorhandene Faksimiles unter `data/sources/images/` blieben im Frontend unsichtbar. Der SZD-Testlauf brachte zudem Korpora mit ausschliesslich remote referenzierten Faksimiles.
-**Entscheidung:** Eine Resolver-Funktion `config.resolve_image_dir` (erst `data/sources/images/`, dann `data/processed/images/`), die alle Skripte nutzen. Schritt 6 kopiert lokale Faksimiles nach `docs/images/{id}/` und bindet `has_images` an das tatsaechlich Anzeigbare. Remote-Faksimiles sind deklarierter Fall: `metadata.image_urls` im Datenvertrag, `<facsimile>` mit `graphic url` im deterministischen TEI, direkte URL-Anzeige im Frontend, Materialisierung ueber `pipeline/fetch_facsimiles.py`.
-**Begruendung:** Eine einzige Aufloesung beseitigt die Klasse der Pfad-Doppeldeutigkeiten, die beide Testlaeufe unabhaengig fanden. Das statische Frontend kann nur unterhalb von `docs/` ausliefern, deshalb Kopie statt Verweis.
-**Alternativen:** Symlinks statt Kopie verworfen (nicht portabel auf Windows und GitHub Pages). Nur-Remote-Anzeige ohne Fetch-Utility verworfen, weil Vision-Transkription und Verifikation lokale Dateien brauchen.
+The documentation stays bilingual. README and SETUP are maintained in English, the knowledge documents in `knowledge/` in German. No unification on one language.
 
-### ADR-004 Konventionsnamen journal.md und decisions.md
+#### Rationale
 
-**Datum:** 2026-07-18
-**Kontext:** Die Promptotyping-Konvention erwartet `journal.md` und `decisions.md`; das Template fuehrte beide nummeriert (`07_JOURNAL.md`, `06_DECISIONS.md`). Nachnutzer, die die Konvention kennen, suchten die Konventionsnamen oder legten Doppel an.
-**Entscheidung:** Umbenennung auf `journal.md` und `decisions.md`. Die Lesereihenfolge stellt die Tabelle in [[00_INDEX]] her, nicht das Dateipraefix.
-**Begruendung:** Ein Name pro Rolle; die Konvention ist die aeltere und breitere Quelle der Wahrheit.
-**Alternativen:** Deklaration der nummerierten Namen als bewusste Abweichung verworfen, weil sie den Konflikt nur dokumentiert statt beseitigt.
+The two languages served two different readerships. The English README and SETUP address fork users, the German `knowledge/` addresses the agent and the German-speaking edition team that fills the knowledge base. A unification would serve one of the two readerships worse.
 
-### ADR-005 Validierungsziel ist eine Projektentscheidung
+#### Alternatives
 
-**Datum:** 2026-07-18
-**Kontext:** Die Leitstellen-Strengpruefung zeigte, dass das deterministisch erzeugte TEI an vorbestehenden Header-Strukturen der DTABf-RNG scheitert (title-Attribute, projectDesc, revisionDesc, facsimile-Position), nicht an den neuen note-Typen. Das Template behauptete implizit DTABf als Validierungsziel, ohne es zu erfuellen. Gegen TEI All validieren alle vier zbz-Testlauf-TEI fehlerfrei (geprueft 2026-07-18).
-**Entscheidung:** Das Template konfiguriert TEI All als lauffaehiges technisches Ausgangsziel. Jeder Fork bestaetigt oder ersetzt dieses Ziel durch DTABf, ein eigenes RNG oder ein aus ODD erzeugtes Schema. `VALIDATION_SCHEMA` in `pipeline/config.py` ist die gemeinsame Konfigurationsstelle; `pipeline/validate_schema.py` prueft dagegen. Die DTABf-Dateien bleiben als ausgearbeitetes Beispielprofil im Template, mit dokumentiertem Header-Caveat fuer den strengen Fall.
-**Begruendung:** Die beiden urspruenglichen Optionen (TEI All hart dokumentieren oder den Header streng DTABf ziehen) haetten je eine Projektklasse schlechter bedient; die Konfigurierbarkeit loest beide Faelle und macht das behauptete Ziel pruefbar statt implizit.
-**Alternativen:** Header streng DTABf-konform ziehen verworfen als alleinige Loesung (bindet alle Forks an ein Profil, das nicht alle brauchen); TEI All als einziges deklariertes Ziel verworfen (verliert die Strenge fuer Projekte, die ein Profil pflegen).
+A complete switch to English was rejected, because the knowledge base connected conceptually to the German-language source projects and the edition team worked in German. A complete switch to German was rejected, because it would restrict the international forkability of the template.
 
-### ADR-006 Evaluationsmodul aep_eval mit deklarierten CER-Profilen
+### ADR-002 One data contract, API-key gate instead of an import mode (2026-07-18)
 
-**Datum:** 2026-08-22
-**Kontext:** Die Bestandsaufnahme der Forschungsleitstelle (Pilot Agentic Edition Evaluation, T-024) fand drei unvereinbare CER-Rechenwege im Umfeld des Templates: der Schuchardt-Fork misst gegen die publizierte Edition mit Whitespace-Normalisierung, zbz-ocr-tei misst gegen manuelle Referenz-TEIs mit symmetrischer Normalisierung und Fidelity/Scope-Zerlegung, SZD-HTR mit eigener Protokoll-Normalisierung. Das Template selbst hatte keine Evaluation. Die TEI-Pruefung war schemaspezifisch und ohne gemeinsames Ergebnisformat. Der Operator autorisierte die lokale Implementierung einer ersten Scheibe (OP-003, OP-004 der Leitstelle).
-**Entscheidung:** Ein eigenstaendiges Paket `aep_eval` (CLI `uv run python -m aep_eval MANIFEST --out DIR`) liest ein JSON-Schema-geprueftes Fixture-Manifest (Hypothese, Referenz, Scope, Referenzklasse, Reifestufe, Git-Anker, Hashes), berechnet CER unter deklarierten Profilen und prueft TEI gegen ein ausdruecklich benanntes RelaxNG-Schema; Ergebnisse als schema-geprueftes JSON und Markdown. v0.1 traegt zwei Profile, `hsa-strict` (Port von tools/evaluate_cer.py des Forks, aggregiert zeichengewichtet) und `zbz-fidelity` (Port von extract_text_for_comparison, normalize_for_comparison und classify_edit_operations aus zbz-ocr-tei, aggregiert als Mittel ueber Fixtures). Jedes Ergebnis fuehrt Profil, Referenzklasse und Reifestufe (beobachtete Funktion, formale Validierung, modellbeurteilt, menschlich geprueft, operatorabgenommen) als Pflichtfelder. Regressionsanker: Schuchardt 0,0598 ueber achtzehn Briefe und 18/18 gegen tei_all.rng; Hersch end_to_end_fidelity.mean 0,020804 ueber 25 Referenzdokumente als technisches Orakel mit dokumentierter Provenienz (Quelldatei auf unsauberem Worktree erzeugt). Eingaben bleiben read-only; Quelltexte und Faksimiles werden nicht in das Template kopiert. Zwei Laufzeitabhaengigkeiten kommen hinzu, jsonschema und rapidfuzz.
-**Begruendung:** Ohne deklariertes Normalisierungsprofil sind CER-Werte zwischen Projekten nicht vergleichbar; das Profil als Pflichtfeld macht die Nichtvergleichbarkeit sichtbar statt sie zu verstecken. Die Ports reproduzieren die eingefrorenen Zahlen der Quellprojekte exakt und sind damit gegen die Originale auditierbar. Die Reifestufe trennt technische Konformitaet von fachlicher Validierung, die beim Operator bleibt. rapidfuzz ist noetig, weil die Fidelity-Zerlegung die Opcodes des minimalen Alignments braucht und eine Python-Rueckverfolgung bei Dokumenten mit mehreren hunderttausend Zeichen nicht traegt.
-**Alternativen:** Ein universelles Normalisierungsprofil verworfen (es gibt keins, das beide Quellvertraege abbildet). Evaluation als Pipeline-Schritt 07 verworfen fuer v0.1 (erst nach Bestaetigung des Vertrags und mit Struktur- und Entity-Evaluatoren sinnvoll, siehe Leitstellenplan M10). Reine Python-Levenshtein ohne Abhaengigkeit verworfen (Laufzeit und Speicher bei den Hersch-Dokumenten).
+#### Context
 
-### ADR-007 Isolierter Offline-Quickstart mit synthetischem Korpus
+The two fork test runs found three key variants for the same page text (`transcription` in the prompt and in steps 4 and 5, `text` in the quality signals, nested `pages` in step 3) and silent metadata loss in step 4. A declared path for transcriptions produced without a provider key was missing as well.
 
-**Datum:** 2026-08-26
-**Kontext:** Das Template enthielt einen testintern belegten Offline-Pfad, aber kein direkt ausfuehrbares Beispiel fuer Fork-Nutzende. Ein Lauf im Repository-Wurzelverzeichnis wuerde das bewusst ungefuellte Knowledge-Skelett und die Arbeitsdaten des Templates mit Beispieldaten vermischen.
-**Entscheidung:** `examples/offline-quickstart/` traegt zwei synthetische, vertragskonforme Transkriptionsdateien, ausgefuelltes Beispielwissen und einen Runner. Der Runner erzeugt einen separaten lokalen Projektordner, kopiert die realen Pipeline- und Frontend-Dateien dorthin und fuehrt Schritt 4 ohne LLM, Schritt 5, die explizite RelaxNG-Pruefung gegen TEI All und Schritt 6 ueber ihre oeffentlichen CLIs aus. Er leert alle Provider- und API-Key-Variablen vor den Kindprozessen. Ein Ownership-Sentinel bindet jedes Ziel an seinen absoluten Pfad. Rekursiver Ersatz setzt auch am kanonischen Default-Ziel einen unveraenderten Sentinel voraus; leere Ziele koennen erstmals befuellt werden. Pfade ueber symbolische Links oder Windows-Reparse-Points werden vor ihrer Aufloesung abgelehnt. Ein maschinenlesbarer Abschlussbericht dokumentiert Objektmenge, Pruefungen, Schema, Sentinel und Offline-Konfiguration.
-**Begruendung:** Der Lauf prueft den tatsaechlichen Kommandozeilenpfad in frischen Prozessen. Das Template-Skelett, vorhandene Korpusdaten und Provider-Konfigurationen bleiben unberuehrt. Die fail-closed Zielpruefung verhindert, dass `--force` fremde Verzeichnisinhalte loescht. Synthetische Texte vermeiden Abhaengigkeiten von Bildrechten, externen Diensten und fachlich noch nicht abgenommenen Produktivdaten.
-**Alternativen:** Vorgefertigte TEI- und Frontend-Ausgaben wurden verworfen, weil sie die Verarbeitungskette nicht pruefen. Das Kopieren der Fixtures in `data/processed/` des Template-Repositories wurde verworfen, weil Beispiel- und Nutzerdaten dann denselben Arbeitszustand teilen.
+#### Decision
 
-### ADR-008 Publikationsmetadaten und TEI-Download im statischen Serving-Root
+One single data contract, today the [data contract](../reference/data-contract.md), with `pages` at the top level, page text under `transcription` and object metadata under `metadata`, passed unchanged from step 3 to step 6. Every stage with a provider call checks the API key at start and stops with a clear message. Step 3 has no import mode, and externally produced transcriptions are written in conformance with the contract directly to `data/processed/transcriptions/`.
 
-**Datum:** 2026-08-26
-**Kontext:** Der Datenvertrag versprach die Abbildung von Objektdaten auf `origDate`, die deterministische TEI-Erzeugung liess `date` und `repository` jedoch aus. Dadurch verlor der Frontend-Katalog die Datumswerte. Der Download-Button verwies auf `results/tei/`, obwohl der lokale Server und GitHub Pages ausschliesslich `docs/` ausliefern.
-**Entscheidung:** Schritt 5 schreibt `metadata.date` als `history/origin/origDate` und `metadata.repository` als `msIdentifier/repository`. Semantisch gueltige Kalenderwerte erhalten `origDate/@when`; freie Datierungen bleiben als sicher maskierter Text ohne Normalisierungsattribut erhalten. Schritt 6 synchronisiert die erfolgreich verarbeiteten kanonischen TEI-Dateien als exakten XML-Spiegel nach `docs/tei/{object_id}.xml`; der Client verwendet diesen relativen Pfad fuer den Download.
-**Begruendung:** Die Metadaten bleiben damit entlang des bestehenden Vertrags sichtbar und stellen die statische Filterbasis bereit. Alle publizierten Assets liegen unter demselben statischen Serving-Root und funktionieren lokal sowie im GitHub-Actions-Deployment. Der exakte Spiegel verhindert veraltete Download-Dateien nach einem fehlgeschlagenen oder verkleinerten Korpuslauf.
-**Alternativen:** Das Entfernen des Download-Buttons wurde verworfen, weil TEI-Export eine zugesagte Standardfunktion ist. Ein relativer Zugriff auf `results/tei/` wurde verworfen, weil dieser Ordner ausserhalb des publizierten Wurzelverzeichnisses liegt.
+#### Rationale
 
-### ADR-009 Lineage-Kategorien und deterministische TEI-Grenze
+Steps 4 and 5 already expected the flat contract, so adapting step 3 was the smallest intervention. An import mode would create a second entrance with its own validation logic, while the documented contract delivers the same capability without code. Running on silently without a key produced empty results without an error message in the test runs.
 
-**Datum:** 2026-08-27
-**Kontext:** README und Wissensbasis vermischten vier Herkunftsprojekte, geplante Forks, den inzwischen abgeschlossenen Schuchardt-Lauf und eigenständige Projektpipelines. Zugleich versprach die Dokumentation weiterhin einen optionalen LLM-Annotationspfad in Schritt 5, obwohl der Code seit dem Operatorentscheid vom 24.08.2026 ausschließlich deterministisch arbeitet.
-**Entscheidung:** [[lineage]] unterscheidet reale Editionsfälle, technische Quellen, Prüfartefakte, direkte Projektinstanzen, architektonische Übertragungen und konzeptionelle Vorläufer. Hersch, SZD und DoCTA sind die drei realen Editionsfälle. Hersch und SZD bilden die empirische und technische Ausgangsbasis der Verallgemeinerung; DoCTA wendet die Architektur in einem eigenständigen Projekt an. Offline-Quickstart und lokaler HSA-Briefe-Fork sind technische Prüfartefakte. Schritt 5 bleibt ein deterministischer Basispfad. Semantische Annotation und komplexe Strukturen werden als projektspezifische deterministische Erweiterung oder als getrennte, dokumentierte Stufe implementiert. Tote Provider-Konfiguration und das ungenutzte Annotationsprompt entfallen.
-**Begruendung:** Die Kategorien machen Forschungsbeitrag, Herkunft, Code-Abstammung und Evidenzumfang prüfbar. Die Dokumentation beschreibt damit den ausgeführten Codepfad und verhindert, dass ein Knowledge-Eintrag als bereits implementierte Transformation gelesen wird.
-**Alternativen:** DoCTA als wörtlichen Fork zu bezeichnen wurde verworfen, weil keine gemeinsame Git-Abstammung oder Übernahme des Template-Dateivertrags belegt ist. Der alte LLM-Annotationspfad wurde verworfen, weil er keinen Codeleser besitzt und falsche Laufzeit- sowie Provenienzannahmen erzeugt.
+#### Alternatives
 
-### ADR-010 Gemeinsamer Kern aus Hersch/ZBZ, SZD und DoCTA
+An `--import` flag for step 3 was rejected as a second code path for the same contract. Reloading the metadata in step 5 from `transcriptions/` was rejected, because passing them through in step 4 keeps the contract continuous.
 
-**Datum:** 2026-08-27
-**Kontext:** Der aktuelle Vergleich der drei offiziellen Editionsfälle fand wiederkehrende Anforderungen, die die Vorlage bisher nur dokumentierte oder erst nach der Transkription abbildete. SZD und DoCTA steuern unterschiedliche Materialien mit eigenen Promptmodulen. Alle drei Projekte trennen maschinelle Ergebnisse von menschlich geprüften Textständen. ZBZ und DoCTA führen Statuswerte als kontrollierte Arbeitszustände. Alle drei beziehen Faksimiles aus externen Repositorien. Die Vorlage konnte Remote-Bilder erst aus einer bereits vorhandenen Transkriptionsdatei oder TEI-Datei laden und montierte die beschriebenen Promptschichten 2 bis 4 nicht im ausgeführten Code.
-**Entscheidung:** `data/sources/manifest.json` wird der frühe Vertrag für Dokumentmetadaten, Remote-Seiten und Promptprofile. Schritt 2 führt ihn mit lokalen Quellen zusammen. Schritt 3 montiert Basisregeln, Profil, Metadaten und Objektregel und protokolliert Schichten und Hash. Jede erzeugte Seite erhält eine unveränderliche `transcription_raw`, einen bearbeitbaren Text und den menschlich kontrollierten Status `machine_unreviewed`. Die Statusfolge umfasst außerdem `in_review`, `human_verified` und `accepted`. Automatische Qualitätswerte bleiben davon getrennt. Die Modellantwort muss genau eine Seite pro Bild enthalten. Schritt 5 schreibt den niedrigsten Seitenstatus in `revisionDesc` und erzeugt aus derselben validierten Eingabe byte-identisches TEI.
-**Begruendung:** Diese Funktionen treten in allen drei Fällen unter unterschiedlichen Bezeichnungen auf und lösen dieselben Vertragsprobleme. Der gemeinsame Kern stellt Herkunft, Vollständigkeit und Reife eines Textstands fest, bevor projektspezifische Annotation oder Publikation beginnt. Die frühe Manifest-Eingabe beseitigt den Zirkelschluss, nach dem Remote-Bilder erst aus einem Ergebnis der Transkription geladen werden konnten.
-**Alternativen:** Automatische Ableitung eines Promptprofils aus freien Dokumenttyp-Bezeichnungen wurde verworfen, weil sie undeutliche und schwer reproduzierbare Zuordnungen erzeugt. Ein automatischer Wechsel des menschlichen Prüfstatus durch Qualitätssignale wurde verworfen, weil technische Plausibilität keine fachliche Kontrolle belegt. Layoutregionen, Entitätsmodelle und projektspezifische Markervokabulare bleiben Erweiterungen, weil ihre Verträge zwischen den drei Fällen deutlich abweichen.
+### ADR-003 Central image-root resolution and remote facsimiles (2026-07-18)
 
-### ADR-011 Version 0.9 und zustandsgebundene Vertrauensgrenzen
+#### Context
 
-**Datum:** 2026-08-27
-**Kontext:** Die Vorlage trug bereits die Bezeichnung 1.0, obwohl provider- und projektspezifische Läufe, fachliche Prüfung und Nutzerabnahme für den aktuellen Kern ausstanden. Die Prüfung der drei Editionsfälle und des Schuchardt-Laufs zeigte außerdem, dass bloße Dateiexistenz, Seitenzahlen und Zeichenmengen frühere Ergebnisse unzureichend an ihre Quellen banden.
-**Entscheidung:** Das Repository bleibt bei Version `0.9.0` und kennzeichnet sich als Vorabversion. Schritt 1 bindet Renderings an PDF-Hash und Auflösung. Der Remote-Fetch bindet URL, Dateiname und Bildhash. Schritt 3 bindet Modell, montierte Anweisung, ausgeführte Chunk-Prompts und Bildbytes. Schritt 4 bindet Eingabe und Validierungsbefunde mit getrennten Zustands-Hashes. Schritt 5 akzeptiert ausschließlich den vollständigen Schritt-4-Vertrag und erzeugt TEI deterministisch. Schritt 6 prüft Faksimilebytes, veröffentlicht atomar und entfernt zurückgezogene oder veraltete Assets. Der Pages-Workflow prüft RelaxNG und den Status `accepted` vor dem Build. Python-Abhängigkeiten werden mit uv und `uv.lock` reproduzierbar installiert; Ruff, Formatprüfung und Pytest bilden das technische Gate.
-**Begruendung:** Jede Abschlussaussage verweist damit auf einen benannten und überprüften Zustand. Technische Validierung, beobachtete Funktion, fachliche Prüfung und Nutzerabnahme bleiben unterscheidbar. Version 1.0 setzt eine ausdrückliche Nutzerabnahme sowie mindestens einen aktuellen provider- und projektspezifischen Lauf voraus.
-**Alternativen:** Eine sofortige Bezeichnung als 1.0 wurde wegen der ausstehenden Abnahme verworfen. Fortgesetzte Existenz-Skips wurden verworfen, weil geänderte Quellen und Anweisungen sonst alte Ergebnisse als aktuell erscheinen lassen.
+Image path resolution was duplicated per script and inconsistent. Step 6 checked only `data/processed/images/`, step 3 preferred it, and existing facsimiles under `data/sources/images/` stayed invisible in the frontend. The SZD (Stefan Zweig Digital) test run also brought corpora with exclusively remotely referenced facsimiles.
 
-### ADR-012 Version 0.10 mit lokalem Korrekturvertrag
+#### Decision
 
-**Datum:** 2026-09-08
-**Kontext:** Zwei lokale Demo-Instanzen konkretisierten die Rückführung von Browserkorrekturen in Transkriptionsdaten und TEI. Sie zeigten außerdem die Bedeutung von unverändertem Modelltext, getrennten Vorschlägen und der Bindung späterer Annotationen an ihren Eingabetext. Ein Demo-Test setzte fälschlich einen unveränderten realen Nutzerstand voraus. Die neuen Regressionen verwenden deshalb ausschließlich synthetische Daten.
-**Entscheidung:** Ein optionaler Loopback-Dienst verbindet Browser und autorisierte lokale Agenten mit demselben versionierten Speicherweg. Jede Korrektur dokumentiert Vorher-/Nachher-Werte und setzt die Seite auf `in_review`. Vor der Übernahme laufen die bestehenden deterministischen Stufen, Textbewahrung und das konfigurierte RelaxNG-Schema. Snapshots, Transaktionsmarker und Prozesssperre sichern den Schreibweg. Vorschläge bleiben separat. TEI-Ereignisse nennen Akteur und Seite; vollständige private Korrekturdaten werden nicht in die statische Ausgabe kopiert. Abweichende, bereits angereicherte TEI erfordert den projektspezifischen Workflow. Optionale Annotationen erhalten eine überprüfbare Textbindung; veraltete Bindungen blockieren die Publikation.
-**Begruendung:** Die Rückführung muss alle veröffentlichten Darstellungen eines Textstands konsistent halten. Ein gültiges Schema allein bestätigt weder eine Lesung noch eine fachliche Abnahme. Selbst angegebene Akteurnamen reichen für die nachvollziehbare lokale Sitzung, begründen aber keine Mehrbenutzerauthentifizierung.
-**Umfang:** Version `0.10.0` bleibt eine Vorabversion. Private Aufrufprotokolle und hashgebundene Chunk-Wiederaufnahme erweitern Schritt 3. Layoutanalyse, neue NER-Verfahren und Normdatenverknüpfung bleiben außerhalb dieses Auftrags. Die Editionseinstellungen 01 bis 05 bleiben als Vorlagen erhalten; `project.md`, `specification.md` und die verknüpften Verträge steuern die Template-Wartung. `AGENTS.md` ergänzt die gemeinsame Aktionsschicht.
-**Verifikation:** Offline-Regressionen prüfen gespeicherte Korrekturen, Schutz der Rohtexte, Quellenbytes, Konflikte, Wiederherstellung, Annotationserhalt und Modellaufrufprotokolle. Der Browser prüft getrennte Vorschläge, ausdrückliche Übernahme, Eingabeerhalt und statische Leseansicht. Reale Demo-Korpora wurden nicht verändert. Nutzerabnahme, erneute Providerprüfung und Veröffentlichung bleiben offen.
+One resolver function, `config.resolve_image_dir` (first `data/sources/images/`, then `data/processed/images/`), used by all scripts. Step 6 copies local facsimiles to `docs/images/{object_id}/` and binds `has_images` to what can actually be displayed. Remote facsimiles are a declared case with `metadata.image_urls` in the data contract, `<facsimile>` with `graphic url` in the deterministic TEI, direct URL display in the frontend and materialisation through `pipeline/fetch_facsimiles.py`.
 
-### ADR-013 Harness-neutraler Arbeitsvertrag und projektunabhängiger Einstieg
+#### Rationale
 
-**Datum:** 2026-09-08
+A single resolution removes the class of path ambiguities that both test runs found independently. The static frontend can serve only below `docs/`, so step 6 copies the files.
 
-**Kontext:** README und Einrichtung vermischten die allgemeine Vorlage mit ihren historischen Editionsfällen und banden die Bedienung an Claude Code. Die Videoanalyse zeigte zusätzliche Unklarheiten über Modellkontext, Metadatenübernahme, fachliche Abnahme und den Umfang semantischer Annotationen.
+#### Alternatives
 
-**Entscheidung:** `AGENTS.md` enthält den gemeinsamen Arbeitsvertrag. `CLAUDE.md` verweist als toolbezogener Einstieg darauf. README und Softwarebeschreibung erklären die nachnutzbare Vorlage, den AI-Harness und die unabhängige Wahl der Verarbeitungsmodelle. Zusätzliche Technologien erfordern explizite Adapter oder Konverter. Herkunftsfälle bleiben in [[lineage]] und [[case-comparison]]. `SETUP.md` und `reference/` tragen Einrichtung, Befehle und Evaluationsgrenzen.
+Symbolic links instead of a copy were rejected as not portable to Windows and GitHub Pages. Remote-only display without a fetch utility was rejected, because vision transcription and verification need local files.
 
-**Verarbeitung:** Die nummerierten Skripte behalten ihre Schnittstellen. Alternative Einstiege und Abhängigkeiten werden dokumentiert. Qualitätsbewertung, RelaxNG-Prüfung und fachliche Abnahme sind getrennte Operationen. Design konkretisiert die Prüfaufgaben am ersten Beispiel und bei neuen Befunden. Starre Mengen an Epics oder User Stories entfallen.
+### ADR-004 Convention names journal.md and decisions.md (2026-07-18)
 
-**Rückschreibung:** [[02_DATA]] und [[03_CONTEXT]] regeln Eingaberollen, Metadatenkontext und Referenzbildung. [[04_TEI_MAPPING]] unterscheidet Erwähnungen, Identitäten, Rollen und Beziehungen. [[local-review]] und [[provider-records]] begrenzen den Aussageumfang gespeicherter Änderungen und Aufrufe. [[specification]] kennzeichnet aus dem Video abgeleitete, noch nicht implementierte Funktionen.
+#### Context
 
-**Technische Folge:** Der Offline-Quickstart übernimmt den Arbeitsvertrag und seine Referenzen zusammen mit den synthetischen Beispielen und dem bestehenden Evaluator. Linkprüfungen sichern diese Navigation im Repository und im erzeugten Beispiel. Editionseinstellungen, echte Demo-Daten und bestehende lokale Änderungen bleiben erhalten. Version `0.10.0` bleibt eine Vorabversion.
+The Promptotyping convention expects `journal.md` and `decisions.md`, while the template kept both numbered (`07_JOURNAL.md`, `06_DECISIONS.md`). Users who knew the convention searched for the convention names or created duplicates.
+
+#### Decision
+
+Renaming to `journal.md` and `decisions.md`. The reading order comes from the table in [[00_INDEX]].
+
+#### Rationale
+
+One name per role, and the convention is the older and broader source of truth.
+
+#### Alternatives
+
+Declaring the numbered names as a deliberate deviation was rejected, because it only documents the conflict instead of removing it.
+
+### ADR-005 The validation target is a project decision (2026-07-18)
+
+#### Context
+
+The strict check by Research Mission Control showed that the deterministically generated TEI failed the DTABf RelaxNG schema (DTA base format of the Deutsches Textarchiv) on pre-existing header structures (`title` attributes, `projectDesc`, `revisionDesc`, `facsimile` position). The new note types caused no error. The template implicitly claimed DTABf as validation target without meeting it. All four TEI files of the ZBZ (Zentralbibliothek Zürich) test run validated against TEI All without errors (checked 2026-07-18).
+
+#### Decision
+
+The template configures TEI All as runnable technical default target. Every fork confirms this target or replaces it with DTABf, its own RelaxNG schema or a schema generated from ODD. `VALIDATION_SCHEMA` in `pipeline/config.py` is the shared configuration point, and `pipeline/validate_schema.py` checks against it. The DTABf files stayed in the template as a worked example profile with a documented header caveat for the strict case.
+
+Since 2026-09-27 the template no longer ships a DTABf schema, and `schemas/README.md` names its sources and licence.
+
+#### Rationale
+
+The two original options, documenting TEI All as fixed target or pulling the header strictly to DTABf, would each have served one class of projects worse. Configurability solves both cases and makes the claimed target explicit and checkable.
+
+#### Alternatives
+
+Pulling the header strictly to DTABf was rejected as the sole solution, because it binds all forks to a profile not all of them need. TEI All as the only declared target was rejected, because it loses strictness for projects that maintain a profile.
+
+### ADR-006 Evaluation module aep_eval with declared CER profiles (2026-08-22)
+
+#### Context
+
+The inventory by Research Mission Control (pilot Agentic Edition Evaluation, task T-024) found three incompatible ways of computing the character error rate (CER) around the template. The Schuchardt fork measured against the published edition with whitespace normalisation, zbz-ocr-tei measured against manual reference TEI with symmetric normalisation and a fidelity and scope decomposition, and SZD-HTR used its own protocol normalisation. The template itself had no evaluation. The TEI check was schema-specific and had no shared result format. The operator authorised the local implementation of a first slice (operator points OP-003 and OP-004 of Mission Control).
+
+#### Decision
+
+A standalone package `aep_eval` (CLI `uv run python -m aep_eval MANIFEST --out DIR`) reads a fixture manifest checked against a JSON Schema (hypothesis, reference, scope, reference class, maturity level, Git anchor, hashes), computes CER under declared profiles and checks TEI against an explicitly named RelaxNG schema. Results are schema-checked JSON and Markdown. Version 0.1 carries two profiles. `hsa-strict` ports `tools/evaluate_cer.py` of the fork and aggregates weighted by characters. `zbz-fidelity` ports `extract_text_for_comparison`, `normalize_for_comparison` and `classify_edit_operations` from zbz-ocr-tei and aggregates as the mean over fixtures. Every result carries profile, reference class and maturity level (observed function, formal validation, model-judged, human-reviewed, operator-accepted) as required fields. The regression anchors are Schuchardt 0.0598 over eighteen letters with 18 of 18 valid against `tei_all.rng`, and Hersch `end_to_end_fidelity.mean` 0.020804 over 25 reference documents as a technical oracle with documented provenance (the source file was generated on an unclean worktree). Inputs stay read-only, and source texts and facsimiles are not copied into the template. Two runtime dependencies are added, jsonschema and rapidfuzz.
+
+#### Rationale
+
+Without a declared normalisation profile, CER values are not comparable between projects, and the profile as a required field makes the incomparability visible. The ports reproduce the frozen figures of the source projects exactly and can therefore be audited against the originals. The maturity level separates technical conformance from scholarly validation, which stays with the operator. rapidfuzz is needed because the fidelity decomposition needs the opcodes of the minimal alignment, and a Python backtrace does not carry documents with several hundred thousand characters.
+
+#### Alternatives
+
+A universal normalisation profile was rejected, because none reproduces both source contracts. Evaluation as pipeline step 07 was rejected for version 0.1, because it makes sense only after the contract is confirmed and with structure and entity evaluators (Mission Control plan M10). Pure Python Levenshtein without a dependency was rejected because of run time and memory on the Hersch documents.
+
+### ADR-007 Isolated offline quickstart with a synthetic corpus (2026-08-26)
+
+#### Context
+
+The template contained an offline path proven inside the tests, but no directly executable example for fork users. A run in the repository root would mix the deliberately unfilled knowledge skeleton and the working data of the template with example data.
+
+#### Decision
+
+`examples/offline-quickstart/` carries two synthetic transcription files that conform to the contract, filled example knowledge and a runner. The runner creates a separate local project folder, copies the real pipeline and frontend files there and runs step 4 without a model, step 5, the explicit RelaxNG check against TEI All and step 6 through their public CLIs. It clears all provider and API-key variables before the child processes. An ownership sentinel binds each target to its absolute path. Recursive replacement also requires an unchanged sentinel at the canonical default target, and empty targets can be filled for the first time. Paths through symbolic links or Windows reparse points are rejected before their resolution. A machine-readable final report documents object set, checks, schema, sentinel and offline configuration.
+
+#### Rationale
+
+The run checks the actual command-line path in fresh processes. The template skeleton, existing corpus data and provider configurations stay untouched. The fail-closed target check prevents `--force` from deleting foreign directory contents. Synthetic texts avoid dependencies on image rights, external services and production data not yet accepted.
+
+#### Alternatives
+
+Prebuilt TEI and frontend outputs were rejected, because they do not check the processing chain. Copying the fixtures into `data/processed/` of the template repository was rejected, because example and user data would then share the same working state.
+
+### ADR-008 Publication metadata and TEI download in the static serving root (2026-08-26)
+
+#### Context
+
+The data contract promised the mapping of object data to `origDate`, but the deterministic TEI generation left out `date` and `repository`, so the frontend catalogue lost the date values. The download button pointed to `results/tei/`, although the local server and GitHub Pages serve only `docs/`.
+
+#### Decision
+
+Step 5 writes `metadata.date` as `history/origin/origDate` and `metadata.repository` as `msIdentifier/repository`. Semantically valid calendar values get `origDate/@when`, and free datings stay as safely escaped text without a normalising attribute. Step 6 synchronises the successfully processed canonical TEI files as an exact XML mirror to `docs/tei/{object_id}.xml`, and the client uses this relative path for the download.
+
+#### Rationale
+
+The metadata stay visible along the existing contract and provide the static filter basis. All published assets lie under the same static serving root and work locally and in the GitHub Actions deployment. The exact mirror prevents stale download files after a failed or reduced corpus run.
+
+#### Alternatives
+
+Removing the download button was rejected, because TEI export is a promised standard function. A relative access to `results/tei/` was rejected, because this folder lies outside the published root.
+
+### ADR-009 Lineage categories and the deterministic TEI boundary (2026-08-27)
+
+#### Context
+
+README and knowledge base mixed four source projects, planned forks, the meanwhile completed Schuchardt run and independent project pipelines. The documentation also still promised an optional LLM annotation path in step 5, although the code has worked exclusively deterministically since the operator decision of 24 August 2026.
+
+#### Decision
+
+[[lineage]] distinguishes real edition cases, technical sources, test artefacts, direct project instances, architectural transfers and conceptual precursors. Hersch, SZD and DoCTA (Doing Court in the Tyrolean Alps) are the three real edition cases. Hersch and SZD form the empirical and technical starting point of the generalisation, and DoCTA applies the architecture in an independent project. The offline quickstart and the local fork with letters from the Hugo Schuchardt Archiv (HSA) are technical test artefacts. Step 5 stays a deterministic base path. Semantic annotation and complex structures are implemented as a project-specific deterministic extension or as a separate, documented stage. Dead provider configuration and the unused annotation prompt are removed.
+
+#### Rationale
+
+The categories make research contribution, provenance, code descent and evidential scope checkable. The documentation then describes the executed code path and prevents a knowledge entry from being read as an already implemented transformation.
+
+#### Alternatives
+
+Calling DoCTA a literal fork was rejected, because no shared Git descent and no takeover of the template file contract is documented. The old LLM annotation path was rejected, because it had no code reader and produced false run-time and provenance assumptions.
+
+### ADR-010 Shared core from Hersch/ZBZ, SZD and DoCTA (2026-08-27)
+
+#### Context
+
+The comparison of the three official edition cases found recurring requirements that the template had only documented or mapped only after transcription. SZD and DoCTA steer different materials with their own prompt modules. All three projects separate machine results from human-reviewed text states. ZBZ and DoCTA keep status values as controlled working states. All three obtain facsimiles from external repositories. The template could load remote images only from an existing transcription or TEI file and did not assemble the described prompt layers 2 to 4 in executed code.
+
+#### Decision
+
+`data/sources/manifest.json` becomes the early contract for document metadata, remote pages and prompt profiles, and step 2 merges it with local sources. Step 3 assembles base rules, profile, metadata and object rule and records layers and hash. Every generated page gets an immutable `transcription_raw`, an editable text and the human-controlled state `machine_unreviewed`. The state sequence also includes `in_review`, `human_verified` and `accepted`. Automatic quality values stay separate from it. The model answer must contain exactly one page per image. Step 5 writes the least mature page state into `revisionDesc` and produces byte-identical TEI from the same validated input.
+
+#### Rationale
+
+These functions occur in all three cases under different names and solve the same contract problems. The shared core establishes provenance, completeness and maturity of a text state before project-specific annotation or publication begins. The early manifest input removes the circularity by which remote images could be loaded only from a transcription result.
+
+#### Alternatives
+
+Automatic derivation of a prompt profile from free document-type labels was rejected, because it produces unclear and hardly reproducible assignments. An automatic change of the human review state through quality signals was rejected, because technical plausibility proves no scholarly control. Layout regions, entity models and project-specific marker vocabularies stay extensions, because their contracts differ considerably between the three cases.
+
+### ADR-011 Version 0.9 and state-bound trust boundaries (2026-08-27)
+
+#### Context
+
+The template already carried the label 1.0, although provider-specific and project-specific runs, scholarly review and user acceptance of the current core were outstanding. The examination of the three edition cases and of the Schuchardt run also showed that mere file existence, page counts and character counts bound earlier results insufficiently to their sources.
+
+#### Decision
+
+The repository stays at version `0.9.0` and marks itself as a pre-release. Step 1 binds renderings to PDF hash and resolution. The remote fetch binds URL, file name and image hash. Step 3 binds model, assembled instruction, executed chunk prompts and image bytes. Step 4 binds input and validation findings with separate state hashes. Step 5 accepts only the complete step-4 contract and produces TEI deterministically. Step 6 checks facsimile bytes, publishes atomically and removes withdrawn or stale assets. The Pages workflow checks RelaxNG and the state `accepted` before the build. Python dependencies are installed reproducibly with uv and `uv.lock`, and Ruff, format check and pytest form the technical gate.
+
+#### Rationale
+
+Every completion statement then points to a named and checked state. Technical validation, observed function, scholarly review and user acceptance stay distinguishable. Version 1.0 requires explicit user acceptance and at least one current provider-specific and project-specific run.
+
+#### Alternatives
+
+An immediate label 1.0 was rejected because of the outstanding acceptance. Continued existence skips were rejected, because changed sources and instructions would otherwise make old results appear current.
+
+### ADR-012 Version 0.10 with a local correction contract (2026-09-08)
+
+#### Context
+
+Two local demo instances specified how browser corrections return into transcription data and TEI. They also showed the importance of unchanged model text, separate proposals and the binding of later annotations to their input text. A demo test wrongly assumed an unchanged real user state, so the new regressions use exclusively synthetic data.
+
+#### Decision
+
+An optional loopback service connects the browser and authorised local agents with the same versioned storage path. Every correction documents before and after values and sets the page to `in_review`. Before the takeover, the existing deterministic stages, text preservation and the configured RelaxNG schema run. Snapshots, transaction markers and a process lock secure the write path. Proposals stay separate. TEI events name actor and page, and complete private correction data are not copied into the static output. Deviating, already enriched TEI requires the project-specific workflow. Optional annotations get a checkable text binding, and stale bindings block publication.
+
+#### Rationale
+
+The return path must keep all published representations of a text state consistent. A valid schema alone confirms neither a reading nor a scholarly acceptance. Self-declared actor names suffice for a traceable local session but establish no multi-user authentication.
+
+#### Scope
+
+Version `0.10.0` stays a pre-release. Private call records and hash-bound chunk resumption extend step 3. Layout analysis, new NER methods (named-entity recognition) and authority linking stay outside this commission. The edition settings 01 to 05 remain as templates, while `project.md`, `specification.md` and the linked contracts steer template maintenance (today [[overview]] and the contracts under `reference/`). `AGENTS.md` adds the shared action layer.
+
+#### Verification
+
+Offline regressions check stored corrections, protection of raw texts, source bytes, conflicts, recovery, preservation of annotations and model call records. The browser check covered separate proposals, explicit adoption, input preservation and the static reading view. Real demo corpora were not changed. User acceptance, a renewed provider check and publication remain open.
+
+### ADR-013 Harness-neutral working contract and project-independent entry (2026-09-08)
+
+#### Context
+
+README and setup mixed the general template with its historical edition cases and tied its operation to one harness. The video analysis showed additional ambiguities about model context, metadata takeover, scholarly acceptance and the scope of semantic annotation.
+
+#### Decision
+
+`AGENTS.md` holds the shared working contract, and `CLAUDE.md` points to it as a tool-specific entry. README and software description explain the reusable template, the AI harness and the independent choice of processing models. Additional technologies require explicit adapters or converters. Provenance cases stay in [[lineage]]. `SETUP.md` and `reference/` carry setup, commands and evaluation limits.
+
+#### Processing
+
+The numbered scripts keep their interfaces. Alternative entry points and dependencies are documented. Quality assessment, RelaxNG validation and scholarly acceptance are separate operations. Design specifies the inspection tasks with the first sample and with new findings. Fixed sets of epics or user stories are dropped.
+
+#### Write-back
+
+[[02_DATA]] and [[03_CONTEXT]] govern input roles, metadata context and reference formation. [[04_TEI_MAPPING]] distinguishes mentions, identities, roles and relations. The local review contract and the provider records limit the evidential scope of stored changes and calls. `specification.md`, today [[overview]], marks the functions derived from the video that are not yet implemented.
+
+#### Technical consequence
+
+The offline quickstart takes over the working contract and its references together with the synthetic examples and the existing evaluator. Link checks secure this navigation in the repository and in the generated example. Edition settings, real demo data and existing local changes stay preserved. Version `0.10.0` stays a pre-release.
+
+### ADR-014 English knowledge language (2026-09-27)
+
+Supersedes ADR-001.
+
+#### Context
+
+ADR-001 kept the knowledge documents German for a German-speaking edition team. The operator decided on 24 August 2026 that the template becomes English throughout, and the standing rule for knowledge folders requires English. The knowledge base still mixed German configuration documents with English contracts, and step 2 wrote a German inventory table.
+
+#### Decision
+
+Every Markdown file in `knowledge/` and the contracts in `reference/` are English. The template's decision records and journal entries are translated faithfully and keep their dates and content. German words remain only as proper names of institutions and archives, as script contract (the `INVENTAR_START` and `INVENTAR_END` markers, the German table labels still accepted in `01_PROJECT.md`), as quoted vocabulary of a historical case, or as a term defined in the glossary of [[00_INDEX]]. Step 2 writes the inventory table in English.
+
+#### Rationale
+
+The decision implements the operator decision of 24 August 2026. One language keeps the configuration documents consistent with README, SETUP and the contracts they point to, which were already English.
+
+#### Alternatives
+
+Keeping the bilingual split of ADR-001 was rejected, because it left the configuration documents German while every contract they point to was English.
+
+### ADR-015 Document roles and fork inheritance (2026-09-27)
+
+#### Context
+
+`knowledge/` held three kinds of documents side by side. The numbered documents configure an edition, `08_DATA_CONTRACT.md`, `local-review.md` and `provider-records.md` describe fixed behaviour of the code, and `project.md`, `specification.md`, `lineage.md` and `case-comparison.md` describe the template itself. The fixed base mapping of step 5 stood inside the edition's `04_TEI_MAPPING.md`, and `05_DESIGN.md` repeated the open requirements of `specification.md`. A fork could not tell which documents it fills, which it must not change and which it may drop.
+
+#### Decision
+
+- Edition configuration stays in `knowledge/` as `01_PROJECT.md` to `05_DESIGN.md`. These documents hold placeholders and point to the fixed guidance.
+- Fixed, fork-invariant contracts live in `reference/` as `data-contract.md`, `tei-mapping.md`, `local-review.md` and `provider-records.md`, next to `pipeline.md` and `evaluation.md`. They use Markdown links.
+- Knowledge about the template lives in `knowledge/template/` as `overview.md` (from `project.md` and `specification.md`, with the one open-requirements table) and `lineage.md` (from `lineage.md` and `case-comparison.md`).
+- `00_INDEX.md`, `decisions.md`, `journal.md` and `handoff.md` stay at the root of `knowledge/`. The criteria self-assessment moves from the index into `05_DESIGN.md`.
+- A fork keeps the template's decision records and journal entries as its inherited record and appends its own below a heading naming the fork. It may keep `knowledge/template/` as reference or delete it.
+
+#### Rationale
+
+The roles differ in who changes a document and when. Edition configuration changes per fork, contracts change only with the code, and template knowledge changes only in template maintenance. Separate places make these update cycles visible in the path, so an agent can route a question by file location. Keeping the inherited records lets a fork trace why the code behaves as it does.
+
+#### Alternatives
+
+Keeping the contracts in the numbered sequence of `knowledge/` (as `08_DATA_CONTRACT.md` stood) was rejected, because the sequence otherwise lists the documents a fork fills. Starting a fork with empty records was rejected, because the fork would then lose the reasons behind the code it inherits.
+
+### ADR-016 The field table of 01_PROJECT.md is a machine-read contract (2026-09-27)
+
+#### Context
+
+Step 5 and step 6 each read `01_PROJECT.md` with their own parser. Step 5 matched table labels by substring and fell back to the first heading as title, so rows such as `Langzeitarchivierung` or `Sprachen des Korpus` could fill the language and `[TODO]` placeholders reached the TEI header. SETUP named labels (`Herausgeber / Editor`, `Lizenz`) that the template table did not contain, so editor and licence of a filled template never reached the TEI.
+
+#### Decision
+
+One parser, `project_info` in `pipeline/config.py`, reads only Markdown table rows. A label counts when it equals `Title`, `Editor`, `Institution`, `Edition type`, `Language` or `License` after case folding and trimming, and the German labels `Projektname`, `Titel`, `Herausgeber`, `Editionstyp`, `Sprache`, `Lizenz` and the variants `Publisher` and `Licence` are accepted for existing editions. An empty value or one starting with `[TODO` counts as missing, and the first filled row of a field wins. The unfilled template yields no values. The Language value becomes `langUsage/language/@ident`, so the field asks for a BCP 47 language code. The Edition type decides the line-break rule of step 5. Step 5, step 6 and the local review server use the same parser.
+
+#### Rationale
+
+Exact labels make the table a contract that tests can pin (`tests/test_config.py`) and that an edition team can fill without side effects from headings or neighbouring rows. Treating placeholders as missing keeps invented values out of the TEI header.
+
+#### Alternatives
+
+The substring matching with heading fallback was replaced, because it read unrelated rows and headings. Validation of the language code was not added in this change and remains an open operator decision.
+
+### ADR-017 The judge vocabulary follows its prompt and is part of the judge identity (2026-09-27)
+
+#### Context
+
+Step 4 accepted issue types and perspectives that differed from those `pipeline/prompts/validation.md` asks the judge to use. An answer that followed the prompt therefore violated the accepted vocabulary and counted as `uncertain`, which made the object `problematic`. A stored validation stayed current as long as provider, model and prompt hash matched, even when the accepted vocabulary had changed.
+
+#### Decision
+
+The enumerations in the fenced block of `pipeline/prompts/validation.md` are canonical. `JUDGE_ISSUE_TYPES` and `JUDGE_PERSPECTIVES` in `pipeline/04_validate.py` equal them, and a test compares both. `_meta.judge_vocabulary_hash` records the vocabulary a run accepted, and a stored validation with another vocabulary hash is stale until step 4 runs with `--force`. Every judge call leaves a call record like a transcription call, and its entry in `executed_prompts` names the record.
+
+#### Rationale
+
+The judge can only be held to the vocabulary it is asked for. Binding the vocabulary into the identity of a judged output prevents verdicts accepted under other rules from passing for current ones, in the same way the prompt hash already did for the prompt text.
+
+#### Alternatives
+
+Keeping a separate code vocabulary and mapping prompt terms onto it was rejected, because two vocabularies would drift apart again without a test binding them.
+
+### ADR-018 The evaluator reads markers differently from the pipeline on purpose (2026-09-27)
+
+#### Context
+
+`aep_eval` resolves the transcription markers of a hypothesis before it computes CER. `pipeline/markers.py` defines the marker syntax, and its `resolve_markers` removes struck text and matches only the pipeline's illegibility syntax. The evaluator kept its own copies of the patterns, which could drift from the pipeline.
+
+#### Decision
+
+`aep_eval/profiles.py` copies the four marker patterns verbatim from `pipeline/markers.py`, so the evaluator stays importable without `pipeline/`, and `tests/test_aep_eval_cer.py` fails when the copies differ. Two readings differ deliberately. The evaluator keeps struck text, because both reference extractions keep the content of `<del>`, which step 5 writes for `~~text~~`. It also removes illegibility notes with the wider pattern `ILLEGIBLE_ANY_NOTE`, which covers free-text notes such as `[... Arabic script, ~1 word]`.
+
+#### Rationale
+
+Dropping struck text from the hypothesis alone would count every deletion as a recognition error against references that keep it. The wider illegibility pattern belongs to the `hsa-strict` source evaluator, and narrowing it moves the Schuchardt regression anchor of ADR-006.
+
+#### Alternatives
+
+Importing `resolve_markers` from the pipeline was rejected, because it would change the ported profiles and their frozen figures and would make the evaluator depend on the pipeline package.
+
+### ADR-019 Single TEI output of step 5 and its overwrite guard (2026-09-27)
+
+#### Context
+
+Step 5 wrote each TEI file twice, to `data/processed/tei/` and `results/tei/`, and filled missing header values with invented defaults (language `de`, publisher `agentic-edition-pipeline`). An existing TEI file enriched by hand or by a project workflow could be overwritten by a regular run.
+
+#### Decision
+
+Step 5 writes only `results/tei/{object_id}.xml`, the candidate that schema validation, step 6, the local review server and the publication check read. Its report `results/reports/{object_id}_validation.json` records in `_meta.tei_sha256` the digest of the TEI bytes step 5 last wrote. An existing file with other bytes, or without a recorded digest, is replaced only with `--force`. The header carries only declared values. Without a language in document metadata or `01_PROJECT.md`, `langUsage` is omitted, and without a declared institution `publicationStmt` states in a paragraph that no publisher is declared. Step 6 refuses TEI whose step-5 report names another derivation. The [TEI base mapping](../reference/tei-mapping.md) holds the details.
+
+#### Rationale
+
+One copy removes the question which of two files is canonical. The recorded digest distinguishes a file step 5 wrote from one edited elsewhere without comparing content heuristically. Invented header values would pass schema validation and misstate the edition's language and publisher.
+
+#### Alternatives
+
+Keeping the working copy was rejected, because no reader needed it. Refusing every existing file without `--force` was rejected, because a regular re-run after a text change should replace the file step 5 itself wrote.

@@ -1,109 +1,136 @@
 # Processing reference
 
-This reference describes the supplied scripts. Run commands from the repository root with the locked environment. [SETUP.md](../SETUP.md) defines project decisions and [AGENTS.md](../AGENTS.md) defines authorization and review requirements.
+Run every command from the repository root in the locked environment. The rules that files must satisfy live in the [data contract](data-contract.md), the [base TEI mapping](tei-mapping.md), the [local correction contract](local-review.md) and the [provider records](provider-records.md). Project decisions belong in [SETUP.md](../SETUP.md) and agent rules in [AGENTS.md](../AGENTS.md).
 
-The base path is image preparation → inventory → transcription → quality assessment → deterministic TEI → frontend. Existing contract-conformant transcriptions enter at quality assessment. Checked external TEI can enter at the frontend. These routes have different verification scopes.
+The supplied path runs image preparation, inventory, transcription, quality assessment, base TEI generation and the frontend build in this order. Existing transcription JSON enters at quality assessment and checked external TEI at the frontend build.
 
-## Image preparation and inventory
+## Object selection and error records
+
+Steps 1, 3, 4 and 5 and `fetch_facsimiles.py` take `--object ID` or `--all`. With `--all`, `--sample N` (N ≥ 1) keeps the first N candidates in the step's processing order. An unknown ID, an empty selection or `--sample` without `--all` exits 1 before any work.
+
+These steps and step 6 write `errors.json` on every run, and an empty list clears an earlier failure. A run with a failed item prints each failure on stderr and exits 1.
+
+| Command | `errors.json` in |
+|---|---|
+| `01_extract_images.py` | `data/processed/images/` |
+| `fetch_facsimiles.py` | `data/processed/images/` |
+| `03_transcribe.py` | `data/processed/transcriptions/` |
+| `04_validate.py` | `data/processed/validated/` |
+| `05_annotate_tei.py` | `results/reports/` |
+| `06_build_frontend.py` | `results/frontend/` |
+
+Step 2 writes no error file and exits 1 when a source declaration is invalid.
+
+## Image preparation
 
 ```console
 uv run python pipeline/01_extract_images.py --all
-uv run python pipeline/02_analyze.py
+uv run python pipeline/01_extract_images.py --object ID --dpi 300 --force
 ```
 
-Extraction rasterizes PDFs from `data/sources/pdf/` with PyMuPDF and writes page images under `data/processed/images/{id}/`. `IMAGE_DPI` controls rasterization. It cannot reconstruct missing source detail. Ready scans under `data/sources/images/{id}/` take precedence through the shared image resolver and skip extraction.
+Step 1 rasterizes `data/sources/pdf/{id}.pdf` with PyMuPDF into `data/processed/images/{id}/`, one PNG per page plus a `manifest.json` that records the PDF hash, the resolution and the hash of every page image. `--dpi` overrides `IMAGE_DPI`. A document whose manifest still matches is skipped unless `--force` is given. Scans under `data/sources/images/{id}/` need no extraction, and the shared image resolver prefers them over extracted images.
 
-Inventory combines local files and optional `data/sources/manifest.json` records. It writes `data/inventory.json`; `--update-knowledge` explicitly updates the inventory block in `knowledge/02_DATA.md`. `--format markdown` selects readable output. The inventory command scans the declared corpus; it has no `--object` selector. Language detection is not automatic.
+## Inventory
 
-For manifest-declared remote pages:
+```console
+uv run python pipeline/02_analyze.py
+uv run python pipeline/02_analyze.py --update-knowledge --format markdown
+```
+
+Step 2 scans `data/sources/`, merges the optional `data/sources/manifest.json` and adds materialized images from `data/processed/images/`. It writes `data/inventory.json`, whose records carry a `transcribable` flag that is true only for documents with page images. `--update-knowledge` replaces the block between the `INVENTAR_START` and `INVENTAR_END` markers in `knowledge/02_DATA.md` with an English table whose Step 3 column shows which documents step 3 reads. `--format markdown` prints that table instead of the JSON. The step always scans the whole corpus and detects no languages.
+
+## Remote facsimiles
 
 ```console
 uv run python pipeline/fetch_facsimiles.py --all --from-manifest
+uv run python pipeline/fetch_facsimiles.py --all --from-transcriptions
+uv run python pipeline/fetch_facsimiles.py --object ID --force
 ```
 
-The fetch record binds each URL to saved image bytes. Declared and materialized page counts must match. Inspect the inventory and page order before transcription.
+The utility downloads remote page images into `data/processed/images/{id}/` with a `manifest.json` that binds every URL to its file name and SHA-256. The source of the URLs depends on the mode:
+
+- `--from-manifest` reads `metadata.image_urls` from `data/inventory.json`, after step 2 and before step 3.
+- `--from-transcriptions` reads `metadata.image_urls` from `data/processed/transcriptions/*.json`.
+- Without either flag it reads `<graphic url>` from `results/tei/*.xml`, for imported or generated TEI before step 6.
+
+A page whose file, URL and hash still match is skipped unless `--force` is given. The `FETCH_*` variables in [SETUP.md](../SETUP.md#processing-parameters) set pacing, retries and the response size cap. A response above `FETCH_MAX_BYTES` and bytes that do not decode as JPEG, PNG or TIFF fail the page. Check the licence of the image provider before materializing.
 
 ## Image transcription
 
 ```console
-uv run python pipeline/03_transcribe.py --all --sample 2
+uv run python pipeline/03_transcribe.py --all --sample 2 --dry-run
+uv run python pipeline/03_transcribe.py --object ID
+uv run python pipeline/03_transcribe.py --all --chunk-size 10 --delay 5
 ```
 
-Step 3 reads inventory and local images and writes `data/processed/transcriptions/{id}.json`. The [data contract](../knowledge/08_DATA_CONTRACT.md) specifies pages, metadata, raw text, editable text, notes and review state.
+Step 3 reads `data/inventory.json` and the page images of transcribable documents. Under `--all` it names and skips documents flagged `transcribable: false`, and `--sample` counts only transcribable documents. `--object` with such a document exits 1. The step writes `data/processed/transcriptions/{id}.json`, one call record per provider call under `data/processed/llm-calls/{id}/` and verified chunks under `data/processed/chunk-cache/{id}/`.
 
-Configure `TRANSCRIPTION_PROVIDER` and `TRANSCRIPTION_MODEL`. The cloud adapters require their credentials; Ollama needs its local service and a compatible vision model. `CHUNK_SIZE` bounds images per call and `BATCH_DELAY` spaces document processing.
+It requires `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL` and the adapter's credential, and a missing setting stops the run before any call. `--dry-run` calls no provider and needs no key. It lists each document as `CURRENT` (existing output kept), `PENDING` (would call the provider) or with the upper-cased name of the stage that would fail, and exits 1 if any document would fail.
 
-The prompt combines base rules, selected material profile, selected object metadata and optional object instructions. A missing declared profile fails the document. The output records executed layers, prompt hash and exact image hashes. Each response chunk and the assembled document must preserve consecutive page numbers without missing or additional pages.
+`--chunk-size` (default `CHUNK_SIZE`) bounds the images per call. `--delay` (default `BATCH_DELAY`) pauses after a document that called the provider. `--force` requests fresh calls for existing output. An existing output that no longer matches its recorded inputs fails with stage `stale` until `--force` is given, and output with review history is never replaced.
 
-A non-forced run reuses output only when its contract and recorded input identity still match. Changed prompts, provider, model or image bytes require an explicit rerun. `--force` requests fresh calls; review-history guards still protect corrected transcriptions. Successful chunks can be reused after interruptions under the full cache identity described in [provider records](../knowledge/provider-records.md).
-
-`--sample N` selects the first N documents. Select and record a suitable varied pilot separately. Model confidence, page classification and character statistics are aids to review and do not establish accuracy.
+The prompt layers are listed in [SETUP.md](../SETUP.md#transcription-prompt). A declared profile without its file fails the document, and the profile key `README` is refused. An unparseable answer gets one retry with a JSON hint. A truncated answer fails the document with stage `truncated` and no second call, because a repeat would hit the same output limit.
 
 ## Text quality assessment
 
 ```console
 uv run python pipeline/04_validate.py --all --no-llm
+uv run python pipeline/04_validate.py --all --sample 2
+uv run python pipeline/04_validate.py --object ID --force
 ```
 
-Step 4 reads transcription JSON and writes `data/processed/validated/{id}.json`. Rules flag uncertain or illegible markers, suspicious character patterns and whitespace issues. Thresholds in the script may need adjustment for a different script or material.
+Step 4 reads `data/processed/transcriptions/{id}.json` and writes `data/processed/validated/{id}.json`. The deterministic rules always run. The judge runs when `VALIDATION_PROVIDER` is set and `--no-llm` is absent. It reads the page text without the images, uses `pipeline/prompts/validation.md`, and every judge call leaves a record under `data/processed/llm-calls/{id}/`.
 
-The optional judge uses `VALIDATION_PROVIDER`, `VALIDATION_MODEL` and `pipeline/prompts/validation.md`. It sees transcription text without the source images. Its output is a plausibility assessment.
-
-The automatic `overall_status` is `confident`, `needs_review` or `problematic`. It leaves human-controlled page review states unchanged. Image-quality gates, undeclared empty pages and low document confidence cap the automatic result at `needs_review`.
-
-Findings are bound to the assessed input state and configuration. Changed inputs require an explicit `--force` assessment and cannot inherit old findings silently.
+An existing output is kept while its input state, judge configuration and judge vocabulary still match, as the [data contract](data-contract.md#validated-file) specifies. A stale or unreadable output fails the object until `--force` reassesses it. A `problematic` status is a finding and does not fail the run.
 
 ## Base TEI generation
 
 ```console
 uv run python pipeline/05_annotate_tei.py --all
+uv run python pipeline/05_annotate_tei.py --object ID --validate-only
 uv run python pipeline/validate_schema.py
 ```
 
-Despite its historical filename, step 5 generates base TEI deterministically. It makes no provider call and requires current step-4 output.
+Step 5 calls no model. It reads current step-4 output, the project fields of `knowledge/01_PROJECT.md` and the bound source images, and writes `results/tei/{id}.xml` and `results/reports/{id}_validation.json`. `--validate-only` writes the report without TEI.
 
-It writes synchronized candidates to `data/processed/tei/{id}.xml` and `results/tei/{id}.xml`, plus `results/reports/{id}_validation.json`. `--validate-only` checks generated candidates without writing TEI. `--sample N` bounds the selected documents.
+An existing TEI file that step 5 did not write itself, because it was edited or enriched elsewhere, is refused unless `--force` is given. The [base TEI mapping](tei-mapping.md#output-checks-and-overwrite-guard) specifies this guard and the header and body mapping. After a text correction only step 4 needs `--force`.
 
-The renderer reads project fields from `knowledge/01_PROJECT.md`. The mapping document specifies requirements for extensions and is not injected into a model call. The base covers metadata, pages, paragraphs, diplomatic line breaks, facsimile references and declared page-state notes.
-
-Transcription markers map to `del`, `add`, `unclear` and `gap`. Reconstructing them from the generated TEI must reproduce every page's ordered text after layout-whitespace normalization. Missing pages, reordered text and lost repetitions block output.
-
-Dates and repository metadata enter the source description. Facsimile references bind pages to images. `revisionDesc/@status` records the least mature page review state; provenance and correction events identify the derivation. Identical validated input and project configuration produce identical TEI bytes.
-
-The configured RelaxNG target is a separate check. [Schema documentation](../schemas/README.md) explains TEI All, DTABf and project profiles. Tables, verse, critical apparatus, entity annotations and cross-document identity resolution require implemented extensions.
+`validate_schema.py` checks `results/tei/*.xml`, or the files given as arguments, against `VALIDATION_SCHEMA` or `--schema PATH`. It exits 0 when every file is valid, 1 when a file is invalid or none is found, and 2 when the schema is missing or unusable. The [schema documentation](../schemas/README.md) explains the choice of schema.
 
 ## Review states and corrections
 
-A responsible reviewer can record a state transition:
-
 ```console
-uv run python pipeline/update_review.py --object ID --page N --status STATUS --actor REVIEWER
+uv run python pipeline/update_review.py --object ID --page N --status STATUS --actor REVIEWER --note "reason"
 ```
 
-Pages enter `in_review`, can return to `machine_unreviewed`, advance to `human_verified` and then `accepted`, or reopen as `in_review`. Follow the permitted transition order and rerun dependent stages with `--force` after a change. An automated assessment cannot grant these human decisions.
-
-For local correction after building the edition:
+`update_review.py` records one page transition in the canonical transcription JSON, with `--note` as an optional comment. It refuses to write while an interrupted review transaction awaits recovery. The permitted transitions, the writer lock and the limits for agent actors are defined in the [data contract](data-contract.md#human-review-state). Afterwards, rerun step 4 with `--force`, then steps 5 and 6.
 
 ```console
 uv run python pipeline/review_server.py --port 8080
+uv run python pipeline/review_server.py --recover
 ```
 
-Open [the local editor](http://127.0.0.1:8080/). It offers current and raw text, reasons, history and separate proposals. A save prepares the canonical JSON, deterministic checks, configured schema validation and derived viewer files before replacement. Conflicts preserve the browser draft. Recovery snapshots protect interrupted writes. Already enriched TEI is refused by the base correction path.
+The review server needs a built frontend and binds only 127.0.0.1, with the editor at http://127.0.0.1:8080/. A save stages steps 4 to 6 and the schema check before it replaces any file. A stale version returns HTTP 409, a save that changes nothing returns HTTP 400, and TEI that differs from the base generator's output is refused. The server offers no endpoint for human decisions. `--recover` restores the snapshot of an interrupted transaction and exits.
 
-Read the [local correction contract](../knowledge/local-review.md) before using the API or recovery command. A correction reopens review and does not commit, push or accept the result.
-
-## Frontend and publication
+## Frontend build
 
 ```console
+uv run python pipeline/06_build_frontend.py
 uv run python pipeline/06_build_frontend.py --serve
 ```
 
-The builder reads `results/tei/*.xml` and project metadata. `--force` regenerates existing data; `--serve` previews the static files on port 8080. Do not run the preview and editor on the same occupied port.
+Step 6 reads `results/tei/*.xml`, their step-5 reports and the project title. It writes `docs/data/catalog.json`, `docs/data/{id}.json`, `docs/tei/{id}.xml` and verified image snapshots under `docs/images/{id}/`, and removes obsolete files from that set. Every run rebuilds all objects. A TEI file whose step-5 report names another derivation is left over from a failed regeneration and is refused. External TEI without a report is published.
 
-Output includes `docs/data/catalog.json`, per-document JSON, downloadable TEI under `docs/tei/` and verified local image snapshots under `docs/images/`. Obsolete object data, TEI and images are removed from this generated publication set.
+`--serve` previews `docs/` at http://127.0.0.1:8080/ after a successful build. The preview and the review server both default to port 8080, so run one at a time or give the review server another `--port`.
 
-TEI carrying a source-image hash requires those exact bytes. A clean publication checkout can use its committed verified snapshot when ignored source folders are absent. External TEI without image hashes can retain direct remote image URLs.
+## Publication gate
 
-The supplied viewer has catalog filtering, page views, review labels, provenance and downloads. Corpus-wide search, annotation editors and additional research views need implementation. `knowledge/05_DESIGN.md` guides that work; it is not interpreted automatically by the builder.
+```console
+uv run python pipeline/check_publication.py
+```
 
-The Pages workflow rebuilds the site from committed candidates and requires schema conformance and `revisionDesc/@status="accepted"`. Source rights and human publication authorization remain required. An external-TEI project must explicitly map its review policy to this gate or document an adaptation. Public assets must exclude private logs, credentials and recovery files.
+The gate exits 0 only when no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription and every `revisionDesc/@status` is `accepted`. The Pages workflow runs this gate, the linter and the tests, then step 6, and deploys `docs/` on a push to `main`. A project with external TEI maps its review policy to this gate or documents an adaptation.
+
+## Evaluation
+
+`aep_eval` computes character error rates and schema conformance for declared fixtures without modifying them. The [evaluation reference](evaluation.md) documents its commands.
