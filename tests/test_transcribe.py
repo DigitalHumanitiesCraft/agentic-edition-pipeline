@@ -14,7 +14,7 @@ import pytest
 from conftest import load_step
 
 step3 = load_step("03_transcribe")
-llm = load_step("llm")
+config = load_step("config")
 
 SECRET = "AIzaTESTKEY0123456789"
 
@@ -586,7 +586,7 @@ def test_prompt_assembly_uses_profile_metadata_and_object_override(
 def test_api_failure_never_writes_the_key_into_the_error_record(monkeypatch, tmp_path):
     out_dir = tmp_path / "transcriptions"
     monkeypatch.setattr(step3, "TRANSCRIPTIONS_DIR", out_dir)
-    monkeypatch.setattr(llm, "GEMINI_API_KEY", SECRET)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", SECRET)
     images = _image_paths(tmp_path)
     monkeypatch.setattr(step3, "find_images_for_document", lambda _doc: images)
 
@@ -600,7 +600,7 @@ def test_api_failure_never_writes_the_key_into_the_error_record(monkeypatch, tmp
     assert err["stage"] == "api_call"
     assert SECRET not in err["error"]
 
-    step3.write_errors([err], out_dir)
+    step3.write_errors([err], out_dir, "03_transcribe.py")
     assert SECRET not in (out_dir / "errors.json").read_text(encoding="utf-8")
 
 

@@ -238,7 +238,7 @@ def main():
             errors.append(err)
             print(f"  FAIL {err['object_id']}: {err['error']}")
 
-    write_errors(errors, IMAGES_DIR)
+    write_errors(errors, IMAGES_DIR, "01_extract_images.py")
     if errors:
         print(f"\n{len(errors)} error(s) written to {IMAGES_DIR / 'errors.json'}")
 

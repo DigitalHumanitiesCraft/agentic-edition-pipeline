@@ -15,7 +15,6 @@ import importlib.util
 import io
 import json
 import secrets
-import stat
 import sys
 import tempfile
 import threading
@@ -30,7 +29,15 @@ from types import ModuleType
 from urllib.parse import unquote, urlsplit
 
 import contract
-from config import PROJECT_ROOT, VALIDATION_SCHEMA, write_bytes_atomic
+from config import (
+    PROJECT_ROOT,
+    VALIDATION_SCHEMA,
+    json_bytes,
+    project_info,
+    safe_path,
+    write_bytes_atomic,
+)
+from review_assets import prepare_viewer
 from review_state import dependencies
 from update_review import update_page_review
 from validate_schema import validate_files
@@ -39,7 +46,7 @@ MAX_BODY = 2 * 1024 * 1024
 
 
 def _json_bytes(value: object) -> bytes:
-    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    return json_bytes(value)
 
 
 def _load_step(name: str) -> ModuleType:
@@ -53,36 +60,14 @@ def _load_step(name: str) -> ModuleType:
     return module
 
 
-def _safe_path(root: Path, relative: Path) -> Path:
-    if relative.is_absolute() or ".." in relative.parts:
-        raise ValueError("Path must remain inside the repository")
-    target = root / relative
-    if not target.resolve().is_relative_to(root.resolve()):
-        raise ValueError("Path escapes the repository")
-    for component in (target, *target.parents):
-        if component.is_symlink() or (
-            component.exists()
-            and getattr(component.lstat(), "st_file_attributes", 0)
-            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-        ):
-            raise ValueError("Linked paths are not allowed")
-        if component == root:
-            break
-    return target
-
-
 def prepare_artifacts(root: Path, object_id: str, data: dict) -> dict[Path, bytes]:
     """Run existing offline stages in isolated output directories."""
     validator = _load_step("04_validate")
     annotator = _load_step("05_annotate_tei")
-    from review_assets import prepare_viewer
-
-    project = annotator._extract_project_info(
-        (root / "knowledge/01_PROJECT.md").read_text(encoding="utf-8")
-    )
-    existing = _safe_path(root, Path(f"results/tei/{object_id}.xml"))
+    project = project_info(root / "knowledge/01_PROJECT.md")
+    existing = safe_path(root, Path(f"results/tei/{object_id}.xml"))
     if existing.exists():
-        validated_path = _safe_path(
+        validated_path = safe_path(
             root, Path(f"data/processed/validated/{object_id}.json")
         )
         validated = json.loads(validated_path.read_bytes())
@@ -139,7 +124,7 @@ class ReviewStore:
         self.lock = threading.RLock()
         self.builder = builder
         catalog = json.loads(
-            _safe_path(self.root, Path("docs/data/catalog.json")).read_text(
+            safe_path(self.root, Path("docs/data/catalog.json")).read_text(
                 encoding="utf-8"
             )
         )
@@ -148,12 +133,12 @@ class ReviewStore:
         if problems:
             raise ValueError("Invalid catalog identifiers: " + "; ".join(problems))
         self.object_ids = frozenset(ids)
-        self.marker = _safe_path(self.root, Path("results/review-backups/pending.json"))
+        self.marker = safe_path(self.root, Path("results/review-backups/pending.json"))
 
     def _canonical_path(self, object_id: str) -> Path:
         if object_id not in self.object_ids or not contract.valid_object_id(object_id):
             raise FileNotFoundError("Unknown document")
-        return _safe_path(
+        return safe_path(
             self.root, Path(f"data/processed/transcriptions/{object_id}.json")
         )
 
@@ -176,9 +161,9 @@ class ReviewStore:
             }
 
     def proposals(self, object_id: str) -> list[dict]:
-        directory = _safe_path(self.root, Path(f"data/review-proposals/{object_id}"))
+        directory = safe_path(self.root, Path(f"data/review-proposals/{object_id}"))
         return [
-            json.loads(_safe_path(self.root, path.relative_to(self.root)).read_bytes())
+            json.loads(safe_path(self.root, path.relative_to(self.root)).read_bytes())
             for path in sorted(directory.glob("*.json"))
         ]
 
@@ -186,7 +171,7 @@ class ReviewStore:
         """Restore the interrupted transaction's snapshot, then unlock writes."""
         with self.lock:
             marker = json.loads(self.marker.read_bytes())
-            backup = _safe_path(self.root, Path(marker["backup"]))
+            backup = safe_path(self.root, Path(marker["backup"]))
             if not backup.is_relative_to(self.root / "results/review-backups"):
                 raise ValueError("Invalid recovery snapshot path")
             raw = backup.read_bytes()
@@ -195,12 +180,12 @@ class ReviewStore:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                 manifest = json.loads(archive.read("manifest.json"))
                 entries = {
-                    _safe_path(self.root, Path(name)): archive.read(name)
+                    safe_path(self.root, Path(name)): archive.read(name)
                     for name in archive.namelist()
                     if name != "manifest.json"
                 }
                 absent = [
-                    _safe_path(self.root, Path(name)) for name in manifest["absent"]
+                    safe_path(self.root, Path(name)) for name in manifest["absent"]
                 ]
             allowed = (
                 "data/processed/",
@@ -272,7 +257,7 @@ class ReviewStore:
                     "page": number,
                     "timestamp": timestamp,
                 }
-                destination = _safe_path(
+                destination = safe_path(
                     self.root,
                     Path(f"data/review-proposals/{object_id}/{record['id']}.json"),
                 )
@@ -306,9 +291,7 @@ class ReviewStore:
                 }
             )
             if "quality_signals" in data:
-                quality = _load_step("03_transcribe").compute_quality_signals(
-                    data, len(data["pages"])
-                )
+                quality = contract.compute_quality_signals(data, len(data["pages"]))
                 quality["needs_review"] = True
                 data["quality_signals"] = quality
             problems = contract.file_violations(data)
@@ -321,7 +304,7 @@ class ReviewStore:
             if artifacts.get(canonical_relative) != _json_bytes(data):
                 raise ValueError("Builder did not preserve the canonical edited state")
             targets = {
-                _safe_path(self.root, relative): content
+                safe_path(self.root, relative): content
                 for relative, content in artifacts.items()
             }
             previous = {
@@ -331,7 +314,7 @@ class ReviewStore:
                 raise FileExistsError(
                     "Document changed during validation; reload before saving"
                 )
-            backup = _safe_path(
+            backup = safe_path(
                 self.root,
                 Path("results/review-backups")
                 / object_id
@@ -485,7 +468,7 @@ class ReviewHandler(SimpleHTTPRequestHandler):
         route = self._route()
         if any(part.startswith(".") or ":" in part or "\\" in part for part in route):
             raise FileNotFoundError("Private asset")
-        _safe_path(self.server.store.root / "docs", Path(*route))
+        safe_path(self.server.store.root / "docs", Path(*route))
 
     def do_HEAD(self) -> None:
         if not self._trusted():
@@ -561,7 +544,7 @@ class ReviewServer(ThreadingHTTPServer):
 @contextmanager
 def repository_writer(root: Path):
     """Keep server and recovery CLI mutually exclusive across processes."""
-    path = _safe_path(root.resolve(), Path("results/review-backups/writer.lock"))
+    path = safe_path(root.resolve(), Path("results/review-backups/writer.lock"))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         if sys.platform == "win32":

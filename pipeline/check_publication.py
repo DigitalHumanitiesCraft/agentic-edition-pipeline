@@ -66,7 +66,7 @@ def main() -> int:
     except (
         FileNotFoundError,
         OSError,
-        etree.RelaxNGParseError,
+        ValueError,
         etree.XMLSyntaxError,
     ) as exc:
         print(f"PUBLICATION BLOCKED: {exc}", file=sys.stderr)

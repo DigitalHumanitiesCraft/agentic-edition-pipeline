@@ -37,7 +37,7 @@ from config import (
     ensure_dirs,
     list_page_images,
     ordered_page_images,
-    read_knowledge,
+    project_info,
     source_image_state_hash,
     write_bytes_atomic,
     write_errors,
@@ -46,32 +46,6 @@ from config import (
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
 NS = {"tei": TEI_NS}
-
-
-# ---------------------------------------------------------------------------
-# Project name extraction
-# ---------------------------------------------------------------------------
-
-
-def _extract_project_name(md_text: str) -> str:
-    """Get the project name from 01_PROJECT.md.
-
-    Checks for a 'Projektname' row in a markdown table first, then falls
-    back to the first heading.
-    """
-    for match in re.finditer(r"^\|\s*(.+?)\s*\|\s*(.+?)\s*\|", md_text, re.MULTILINE):
-        key = match.group(1).strip().lower()
-        val = match.group(2).strip()
-        if val == "---":
-            continue
-        if "projektname" in key or "title" in key or "titel" in key:
-            return val
-
-    heading = re.search(r"^#{1,2}\s+(.+)", md_text, re.MULTILINE)
-    if heading:
-        return heading.group(1).strip()
-
-    return "Digital Edition"
 
 
 # ---------------------------------------------------------------------------
@@ -562,8 +536,7 @@ def build_all(force: bool) -> list[dict]:
 
     print(f"Building frontend data from {len(tei_files)} TEI file(s)\n")
 
-    project_md = read_knowledge("01_PROJECT.md")
-    project_name = _extract_project_name(project_md)
+    project_name = project_info().get("title", "Digital Edition")
 
     catalog_objects: list[dict] = []
     errors: list[dict] = []
@@ -705,7 +678,7 @@ def main() -> None:
 
     ensure_dirs()
     errors = build_all(args.force)
-    write_errors(errors, DOCS_DATA_DIR)
+    write_errors(errors, DOCS_DATA_DIR, "06_build_frontend.py")
 
     # A TEI file that could not be read leaves a hole in the published data,
     # so the run fails instead of serving an incomplete edition.

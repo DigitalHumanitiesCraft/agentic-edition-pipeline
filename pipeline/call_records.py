@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 
-from config import write_json_atomic
+from config import redact_secrets, write_json_atomic
 
 _ACTIVE: ContextVar[dict | None] = ContextVar("provider_record", default=None)
 
@@ -25,8 +25,6 @@ def response_data(response) -> dict:
 
 @contextmanager
 def recording(path: Path, metadata: dict):
-    from llm import redact_secrets
-
     record = {**metadata, "started_at": datetime.now(UTC).isoformat(), "responses": []}
     record["_meta"] = {"script": "call_records.py", "timestamp": record["started_at"]}
     token = _ACTIVE.set(record)

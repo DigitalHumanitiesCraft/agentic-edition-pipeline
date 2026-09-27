@@ -8,8 +8,12 @@ tags: [project, metadata]
 
 | Feld | Wert |
 |---|---|
-| Projektname | [TODO] |
+| Title | [TODO] |
+| Editor | [TODO] |
 | Institution | [TODO] |
+| Edition type | [TODO] |
+| Language | [TODO] |
+| License | [TODO] |
 | Zeitrahmen | [TODO] |
 | Ansprechpartner | [TODO] |
 | URL / Repository | [TODO] |

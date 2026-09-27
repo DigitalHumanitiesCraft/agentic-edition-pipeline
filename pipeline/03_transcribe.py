@@ -29,6 +29,7 @@ from config import (
     CHUNK_SIZE,
     DATA_DIR,
     PROMPTS_DIR,
+    TEMPERATURE,
     TRANSCRIPTION_MODEL,
     TRANSCRIPTION_PROVIDER,
     TRANSCRIPTIONS_DIR,
@@ -38,12 +39,14 @@ from config import (
     ordered_page_images,
     provenance_meta,
     provider_config_error,
+    redact_secrets,
     source_image_state,
     source_image_state_hash,
     write_errors,
     write_json_atomic,
 )
-from llm import call_llm, parse_json_response, redact_secrets
+from contract import compute_quality_signals
+from llm import call_llm, parse_json_response
 from review_state import canonical_sha256
 
 INVENTORY_PATH = DATA_DIR / "inventory.json"
@@ -52,13 +55,7 @@ PROMPT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 def _metadata_hash(metadata: dict) -> str:
     """Hash the complete authoritative inventory metadata."""
-    serialized = json.dumps(
-        metadata,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
+    return contract.canonical_hash(metadata)
 
 
 def _has_review_history(data: object) -> bool:
@@ -229,7 +226,7 @@ def transcribe_chunk(
             {
                 "provider": provider,
                 "model": model,
-                "temperature": 0.1,
+                "temperature": TEMPERATURE,
                 "prompt": prompt,
                 "images": source_image_state(images),
                 **call,
@@ -309,75 +306,6 @@ def merge_chunks(chunks: list[dict]) -> dict:
         "pages": merged_pages,
         "confidence": _worst_confidence(chunks),
         "confidence_notes": "\n".join(notes),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Quality signals -- kept deliberately simple for the template.
-# The full 7-signal implementation from szd-htr can be added when adapting
-# to a specific project. For now: page classification and character stats.
-# ---------------------------------------------------------------------------
-
-
-def compute_quality_signals(transcription: dict, image_count: int) -> dict:
-    """Derive quality signals from the page array (data contract key: transcription).
-
-    A page-level page_type declared by the model (blank, foreign_text,
-    gate_low_resolution) takes precedence over the character-count inference.
-    """
-    pages = transcription.get("pages", [])
-
-    total_chars = 0
-    blank_pages = 0
-    undeclared_empty_pages = 0
-    gate_pages = 0
-    foreign_pages = 0
-    page_types: list[str] = []
-
-    for page in pages:
-        text = page.get("transcription", "")
-        char_count = len(text.strip())
-        total_chars += char_count
-
-        declared = page.get("page_type", "")
-        if declared:
-            page_types.append(declared)
-            if declared == "blank":
-                blank_pages += 1
-            elif declared == "gate_low_resolution":
-                gate_pages += 1
-            elif declared == "foreign_text":
-                foreign_pages += 1
-        elif not text.strip():
-            page_types.append("undeclared_empty")
-            undeclared_empty_pages += 1
-        else:
-            page_types.append("content")
-
-    page_count = len(pages)
-    chars_per_page = total_chars / page_count if page_count > 0 else 0
-
-    # Flag for review if images exist but transcription is empty
-    needs_review = undeclared_empty_pages > 0 or (
-        image_count > 0 and blank_pages == image_count
-    )
-
-    return {
-        "page_types": page_types,
-        "total_chars": total_chars,
-        "chars_per_page": round(chars_per_page, 1),
-        "blank_pages": blank_pages,
-        "undeclared_empty_pages": undeclared_empty_pages,
-        "gate_pages": gate_pages,
-        "foreign_pages": foreign_pages,
-        "content_pages": (
-            page_count
-            - blank_pages
-            - undeclared_empty_pages
-            - gate_pages
-            - foreign_pages
-        ),
-        "needs_review": needs_review,
     }
 
 
@@ -504,7 +432,7 @@ def transcribe_document(
             "cache_version": 1,
             "provider": provider,
             "model": model,
-            "temperature": 0.1,
+            "temperature": TEMPERATURE,
             "prompt": system_prompt,
             "metadata": source_metadata,
             "images": source_image_state(chunk_images),
@@ -841,7 +769,7 @@ def main():
         if i < len(docs) - 1:
             time.sleep(args.delay)
 
-    write_errors(errors, TRANSCRIPTIONS_DIR)
+    write_errors(errors, TRANSCRIPTIONS_DIR, "03_transcribe.py")
     if errors:
         print(
             f"\n{len(errors)} error(s) written to {TRANSCRIPTIONS_DIR / 'errors.json'}"

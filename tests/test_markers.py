@@ -5,6 +5,8 @@ hold the module to that declaration and pin the consequence in step 4, where
 a marker must not read as OCR noise.
 """
 
+import re
+
 from conftest import load_step
 
 markers = load_step("markers")
@@ -43,3 +45,29 @@ def test_marker_count_rules_read_the_same_patterns():
     text = "Wort[?] und [?] sowie [...] und [... ~5 chars]"
     assert step4._rule_uncertain_markers(text)["count"] == 2
     assert step4._rule_illegible_markers(text)["count"] == 2
+
+
+def test_combined_pattern_names_every_tei_marker():
+    text = "~~alt~~ {neu} Wort[?] [...] [... ~12 chars] [?] {} ~~~~"
+    found = [
+        (match.lastgroup, match[0]) for match in markers.MARKER_PATTERN.finditer(text)
+    ]
+    assert found == [
+        ("deletion", "~~alt~~"),
+        ("addition", "{neu}"),
+        ("unclear", "Wort[?]"),
+        ("illegible", "[...]"),
+        ("illegible", "[... ~12 chars]"),
+    ]
+    illegible = [
+        match
+        for match in markers.MARKER_PATTERN.finditer(text)
+        if match["illegible"] is not None
+    ]
+    assert [match["quantity"] for match in illegible] == [None, "12"]
+
+
+def test_combined_illegible_group_matches_the_shared_marker():
+    for text in ("[...]", "[... ~3 char]", "[...~ 40 chars]"):
+        assert markers.MARKER_PATTERN.fullmatch(text)["illegible"] == text
+        assert re.fullmatch(markers.ILLEGIBLE, text)

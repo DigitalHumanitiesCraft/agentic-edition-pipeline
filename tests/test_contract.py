@@ -6,6 +6,9 @@ contract tests check finished files with the same functions.
 """
 
 import copy
+import hashlib
+
+import pytest
 
 from conftest import load_step
 
@@ -444,3 +447,187 @@ def test_accepted_review_is_bound_to_the_exact_transcription(fixture_transcripti
         "decision does not match the current page state" in problem
         for problem in contract.file_violations(fixture_transcription)
     )
+
+
+def test_canonical_hashes_keep_the_stored_serialisation():
+    """Golden digests produced by the former per-module hash copies.
+
+    Every stored hash (source images, metadata, review decisions, chunk cache)
+    depends on this serialisation, so a change must fail here first.
+    """
+    text = "Grüße " + chr(0x2013) + " " + chr(0x201E) + "Zitat" + chr(0x201C)
+    sample = {
+        "z": [1, 2.5, None, True],
+        "ä": text + " " + chr(0x1D11E),
+        "a": {"b": "x", "a": ""},
+    }
+    page = {
+        "page": 1,
+        "transcription": "Grüße\n\nZeile",
+        "notes": "n",
+        "page_type": "",
+        "foreign_paragraphs": [1],
+    }
+    data = {
+        "object_id": "o",
+        "_meta": {"x": 1},
+        "pages": [{"page": 1, "transcription_raw": "Grüße"}],
+        "overall_status": "confident",
+        "validation": {"rules": []},
+    }
+    state = [{"page": 1, "filename": "a.png", "sha256": "0" * 64}]
+
+    assert contract.canonical_hash(sample) == "c4c191559025"
+    assert contract.canonical_hash(sample, length=None) == (
+        "c4c191559025d8fd2e44bb8e7782403bd08e0e292fefb563ca9fe449d4097bbd"
+    )
+    assert contract.canonical_hash(state) == "bb9190704006"
+    assert contract.review_page_state_hash(page) == (
+        "74e80bada371444b2ed579aadfd6af5394fe5fe27314d87a46e2f1beb0364984"
+    )
+    assert contract.raw_transcription_state_hash(data) == "88173c057a58"
+    assert contract.transcription_state_hash(data) == "bf4d29a9f2d7"
+    assert contract.validation_result_hash(data) == "50cd2e0483f3"
+    assert contract.text_hash("prompt") == hashlib.sha256(b"prompt").hexdigest()[:12]
+
+
+def test_reserved_pipeline_file_names_are_not_object_ids():
+    for name in ("errors", "Errors", "CATALOG", "catalog"):
+        assert not contract.valid_object_id(name)
+    assert contract.valid_object_id("errors-1901")
+    assert contract.valid_object_id("catalog.v2")
+
+
+MALFORMED = [
+    {"object_id": "a", "pages": None},
+    {"object_id": "a", "pages": "x"},
+    {"object_id": "a", "pages": [None, 1, "x"]},
+    {"pages": [{"page": 1, "transcription": 5, "foreign_paragraphs": [0]}]},
+    {"pages": [{"page": 1, "transcription": "x", "notes": 3, "page_type": ["b"]}]},
+    {"pages": [{"page": [1], "transcription": "x", "edits": [{"id": 5}]}]},
+    {
+        "pages": [
+            {
+                "page": 1,
+                "transcription": "x",
+                "review": {"status": ["x"], "history": [None, {"status": {}}]},
+            }
+        ]
+    },
+    {
+        "_meta": {"pipeline_step": 3, "provider": "g", "executed_prompts": 5},
+        "pages": [{"page": 1, "transcription": "x"}],
+    },
+    {
+        "_meta": {
+            "pipeline_step": 3,
+            "provider": "g",
+            "executed_prompts": [{"chunk": 1, "attempt": 1, "pages": 7}],
+            "source_images": "x",
+        },
+        "pages": [{"page": 1, "transcription": "x"}],
+        "source_images": [1],
+    },
+    {
+        "transcription_meta": {
+            "pipeline_step": 3,
+            "model": "m",
+            "executed_prompts": [{"chunk": [1], "attempt": 1, "pages": None}],
+        },
+        "pages": None,
+    },
+    {
+        "_meta": {"pipeline_step": 4, "provider": "g", "executed_prompts": 7},
+        "pages": [{"page": 1, "transcription": 5}],
+        "validation": {
+            "per_page_stats": [{}],
+            "llm_judge": [{"page": [1]}],
+            "total_characters": 1,
+        },
+        "overall_status": ["x"],
+    },
+    {
+        "_meta": {
+            "pipeline_step": 4,
+            "provider": "g",
+            "executed_prompts": [{"page": [1]}],
+        },
+        "pages": [{"page": 1, "transcription": "x"}],
+        "validation": {"llm_judge": [{"page": {}}], "per_page_stats": "x"},
+    },
+    {
+        "pages": [],
+        "quality_signals": {"page_types": [[1]]},
+        "confidence": ["low"],
+        "overall_status": {},
+        "metadata": {"image_urls": {"a": 1}},
+    },
+]
+
+
+@pytest.mark.parametrize("value", MALFORMED)
+@pytest.mark.parametrize(
+    "check",
+    [
+        contract.file_violations,
+        contract.response_violations,
+        contract.validated_file_violations,
+    ],
+)
+def test_violation_functions_report_instead_of_raising(check, value):
+    problems = check(copy.deepcopy(value))
+
+    assert isinstance(problems, list)
+    assert all(isinstance(problem, str) for problem in problems)
+    # A model response is judged by its pages alone; the file checks must
+    # name every shape above as a violation.
+    if check is not contract.response_violations:
+        assert problems
+
+
+def test_integer_transcription_in_validated_input_is_reported(fixture_validated):
+    fixture_validated["pages"][0]["transcription"] = 5
+
+    problems = contract.validated_file_violations(fixture_validated)
+
+    assert "pages[0] has no transcription string" in problems
+
+
+@pytest.mark.parametrize("field", ["transcription", "notes"])
+def test_characters_outside_xml_are_rejected(fixture_transcription, field):
+    page = fixture_transcription["pages"][0]
+    page[field] = "Zeile" + chr(1) + "Ende"
+    page["transcription_raw"] = page["transcription"]
+    expected = f"pages[0].{field} contains a character not allowed in XML"
+
+    assert expected in contract.file_violations(fixture_transcription)
+    response_page = {"page": 1, "transcription": "x", field: "a" + chr(0xFFFE)}
+    assert f"pages[0].{field} contains a character not allowed in XML" in (
+        contract.response_violations({"pages": [response_page]})
+    )
+    for allowed in ("Tab" + chr(9), "Grüße", chr(0x1D11E), "Zeile" + chr(13) + chr(10)):
+        page[field] = allowed
+        page["transcription_raw"] = page["transcription"]
+        assert expected not in contract.file_violations(fixture_transcription)
+
+
+def test_page_stats_describe_the_current_text():
+    pages = [
+        {"page": 1, "transcription": "eins zwei\ndrei"},
+        {"page": 2, "transcription": ""},
+    ]
+
+    assert contract.page_stats(pages) == [
+        {"char_count": 14, "word_count": 3, "line_count": 2, "page": 1},
+        {"char_count": 0, "word_count": 0, "line_count": 0, "page": 2},
+    ]
+
+
+def test_review_statuses_are_ordered_from_least_mature():
+    assert contract.REVIEW_STATUSES == (
+        "machine_unreviewed",
+        "in_review",
+        "human_verified",
+        "accepted",
+    )
+    assert set(contract.REVIEW_TRANSITIONS) == set(contract.REVIEW_STATUSES)

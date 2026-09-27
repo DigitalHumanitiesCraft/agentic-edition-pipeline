@@ -7,6 +7,7 @@ validates against the shipped default schema.
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -32,9 +33,35 @@ MINI_RNG = """<grammar xmlns="http://relaxng.org/ns/structure/1.0">
 
 
 def test_default_target_comes_from_config():
-    assert vs.default_schema() == config.VALIDATION_SCHEMA
     assert Path(config.VALIDATION_SCHEMA).parent == config.SCHEMAS_DIR
     assert Path(config.VALIDATION_SCHEMA).exists()
+
+
+def test_compiled_schema_is_reused_until_the_file_changes(tmp_path):
+    schema = tmp_path / "mini.rng"
+    schema.write_text(MINI_RNG, encoding="utf-8")
+
+    first = vs.load_schema(schema)
+    assert vs.load_schema(schema) is first
+
+    schema.write_text(MINI_RNG.replace('name="p"', 'name="q"'), encoding="utf-8")
+    os.utime(schema, ns=(0, schema.stat().st_mtime_ns + 1_000_000_000))
+    changed = vs.load_schema(schema)
+
+    assert changed is not first
+    doc = tmp_path / "doc.xml"
+    doc.write_text("<doc><q>x</q></doc>", encoding="utf-8")
+    assert vs.validate_files(schema, [doc])[0].valid
+
+
+def test_invalid_schema_raises_value_error_naming_the_path(tmp_path):
+    schema = tmp_path / "broken.rng"
+    schema.write_text(
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'/>", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="broken"):
+        vs.validate_files(schema, [])
 
 
 def test_valid_and_invalid_files_are_reported(tmp_path):

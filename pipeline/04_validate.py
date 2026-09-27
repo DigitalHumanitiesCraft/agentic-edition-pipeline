@@ -32,6 +32,7 @@ from config import (
     missing_api_key,
     provenance_meta,
     provider_config_error,
+    redact_secrets,
     write_errors,
     write_json_atomic,
 )
@@ -83,15 +84,6 @@ def _rule_double_spaces(text: str) -> dict:
     return {"name": "double_spaces", "count": count, "severity": severity}
 
 
-def _page_stats(text: str) -> dict:
-    """Basic character and word counts for a single page."""
-    return {
-        "char_count": len(text),
-        "word_count": len(text.split()),
-        "line_count": text.count("\n") + (1 if text else 0),
-    }
-
-
 ALL_RULES = [
     _rule_uncertain_markers,
     _rule_illegible_markers,
@@ -109,14 +101,7 @@ def run_deterministic(pages: list[dict]) -> tuple[list[dict], list[dict]]:
     full_text = "\n\n".join(p.get("transcription", "") for p in pages)
     rule_results = [rule(full_text) for rule in ALL_RULES]
 
-    per_page = []
-    for p in pages:
-        txt = p.get("transcription", "")
-        stats = _page_stats(txt)
-        stats["page"] = p.get("page", 0)
-        per_page.append(stats)
-
-    return rule_results, per_page
+    return rule_results, contract.page_stats(pages)
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +157,7 @@ def run_llm_judge(pages: list[dict], prompt_template: str) -> list[dict]:
     verdict. An answer that arrived but could not be parsed is a verdict the
     judge failed to deliver and stays uncertain.
     """
-    from llm import call_llm, parse_json_response, redact_secrets
+    from llm import call_llm, parse_json_response
 
     results: list[dict] = []
     for p in pages:
@@ -549,7 +534,7 @@ def main():
                 except Exception:
                     pass
 
-    write_errors(errors, VALIDATED_DIR)
+    write_errors(errors, VALIDATED_DIR, "04_validate.py")
     if errors:
         print(f"\n{len(errors)} error(s) written to {VALIDATED_DIR / 'errors.json'}")
 

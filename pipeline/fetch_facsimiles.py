@@ -446,7 +446,7 @@ def main():
         sources = [source for source in sources if source[0] == args.object]
     if not sources:
         if source_errors:
-            write_errors(source_errors, IMAGES_DIR)
+            write_errors(source_errors, IMAGES_DIR, "fetch_facsimiles.py")
             print(
                 f"No usable source records; {len(source_errors)} read error(s) written to "
                 f"{IMAGES_DIR / 'errors.json'}.",
@@ -467,7 +467,7 @@ def main():
 
     if not fetched_any:
         print("No remote facsimile URLs found.")
-    write_errors(all_errors, IMAGES_DIR)
+    write_errors(all_errors, IMAGES_DIR, "fetch_facsimiles.py")
     if all_errors:
         print(f"\n{len(all_errors)} error(s) written to {IMAGES_DIR / 'errors.json'}")
         sys.exit(1)

@@ -26,6 +26,18 @@ ALL_MARKERS = (UNCERTAIN, ILLEGIBLE, STRIKETHROUGH, INSERTION)
 
 _STRIP_RE = re.compile("|".join(ALL_MARKERS))
 
+# One pass over a page text for the TEI mapping of step 5. Named groups:
+# deletion and addition carry the wrapped text, illegible the whole bracket
+# with an optional quantity (the character estimate), unclear the word
+# directly before [?]. Wrapped text must be non-empty here, and an uncertainty
+# marker without a preceding word stays literal text.
+MARKER_PATTERN = re.compile(
+    r"~~(?P<deletion>.+?)~~"
+    r"|\{(?P<addition>.+?)\}"
+    r"|(?P<illegible>\[\.\.\.(?:\s*~\s*(?P<quantity>\d+)\s*chars?)?\])"
+    r"|(?P<unclear>[^\s{}\[\]~]+)\[\?\]"
+)
+
 
 def strip_markers(text: str) -> str:
     """Remove every convention marker, including the text a marker wraps."""

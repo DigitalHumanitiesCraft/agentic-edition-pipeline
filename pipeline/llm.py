@@ -1,7 +1,16 @@
 """Multi-provider LLM abstraction. Supports Gemini, OpenAI, Anthropic, Ollama.
 
-Uses raw HTTP via requests instead of provider SDKs to minimize dependencies.
-Adapted from co-ocr-htr llm.js provider patterns and szd-htr retry logic.
+Uses raw HTTP via requests instead of provider SDKs to minimize dependencies;
+requests is the deliberate exception to stdlib HTTP because of its timeout
+and error types. Adapted from co-ocr-htr llm.js provider patterns and
+szd-htr retry logic.
+
+Every adapter receives config.TEMPERATURE, so the value recorded in call
+records is the value sent. Transient failures (429, 5xx, timeouts, connection
+errors) are retried with bounded backoff; any other HTTP error stops at once.
+An answer the provider cut off at its output-token limit raises
+TruncatedResponseError instead of reaching the JSON parser, because a
+truncated JSON would otherwise fail parsing and trigger a second paid call.
 """
 
 from __future__ import annotations
@@ -10,45 +19,29 @@ import base64
 import json
 import mimetypes
 import re
+import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import requests
 
+import config
 from call_records import response_data
-from config import (
-    ANTHROPIC_API_KEY,
-    GEMINI_API_KEY,
-    OLLAMA_BASE_URL,
-    OPENAI_API_KEY,
-)
+from config import redact_secrets
 
-# Timeouts: 240s for cloud APIs, 480s for local Ollama
 CLOUD_TIMEOUT = 240
 LOCAL_TIMEOUT = 480
 
 MAX_RETRIES = 4
 BACKOFF_BASE = 5
-
-# Key redaction. Provider errors quote the request URL and the request
-# headers, so an unredacted message ends up in a console log or in
-# errors.json. Every error string that carries a URL or a provider
-# exception text passes through redact_secrets first.
-REDACTED = "[redacted]"
-_QUERY_KEY_RE = re.compile(
-    r"([?&](?:key|api[_-]?key|access[_-]?token)=)[^&\s\"']+", re.IGNORECASE
-)
+# Upper bound for one wait, including a server's Retry-After, so a hostile
+# or misconfigured header cannot stall a batch run indefinitely.
+MAX_RETRY_WAIT = 120
 
 
-def redact_secrets(text: str) -> str:
-    """Remove key query parameters and configured key values from a message."""
-    if not text:
-        return ""
-    cleaned = _QUERY_KEY_RE.sub(rf"\g<1>{REDACTED}", text)
-    for secret in (GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY):
-        if secret:
-            cleaned = cleaned.replace(secret, REDACTED)
-    return cleaned
+class TruncatedResponseError(RuntimeError):
+    """The provider stopped at its output-token limit; the answer is incomplete."""
 
 
 def encode_image(path: Path) -> tuple[str, str]:
@@ -65,24 +58,22 @@ def call_llm(
     model: str,
     prompt: str,
     images: list[Path] | None = None,
-    temperature: float = 0.1,
 ) -> str:
     """Send a prompt (with optional images) to an LLM provider and return the text response.
 
-    Raises ValueError for missing API keys, RuntimeError for API errors.
+    Raises ValueError for an unknown provider or a missing API key,
+    TruncatedResponseError for an answer cut off at the token limit and
+    RuntimeError for other API errors.
     """
-    if provider == "gemini":
-        return _call_gemini(model, prompt, images, temperature)
-    elif provider == "openai":
-        return _call_openai(model, prompt, images, temperature)
-    elif provider == "anthropic":
-        return _call_anthropic(model, prompt, images, temperature)
-    elif provider == "ollama":
-        return _call_ollama(model, prompt, images, temperature)
-    else:
+    adapter = _ADAPTERS.get(provider)
+    if adapter is None:
         raise ValueError(
             f"Unknown provider '{provider}'. Use gemini, openai, anthropic, or ollama."
         )
+    missing = config.missing_api_key(provider)
+    if missing:
+        raise ValueError(f"{missing} is not set. Add it to .env")
+    return adapter(model, prompt, images, config.TEMPERATURE)
 
 
 def parse_json_response(text: str) -> dict | list | None:
@@ -91,20 +82,18 @@ def parse_json_response(text: str) -> dict | list | None:
     Adapted from szd-htr transcribe.py parse_api_response pattern.
     Returns the parsed object, or None if parsing fails.
     """
-    # Strip markdown code blocks
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
     cleaned = re.sub(r"\n?```\s*$", "", cleaned)
 
-    # First attempt: direct parse
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-    # Second attempt: fix common escape issues (unescaped newlines in strings)
+    # Models often emit raw newlines inside JSON strings; escape them all,
+    # then restore the structural ones around brackets and commas.
     try:
         fixed = cleaned.replace("\n", "\\n")
-        # Restore structural newlines
         fixed = fixed.replace("{\\n", "{\n").replace("\\n}", "\n}")
         fixed = fixed.replace("[\\n", "[\n").replace("\\n]", "\n]")
         fixed = fixed.replace(",\\n", ",\n")
@@ -115,25 +104,25 @@ def parse_json_response(text: str) -> dict | list | None:
     return None
 
 
-# --- Provider implementations ---
+def _truncated(provider: str, field: str, value: str) -> TruncatedResponseError:
+    return TruncatedResponseError(
+        f"{provider} stopped at the output token limit ({field} {value}); "
+        "the answer is incomplete"
+    )
 
 
 def _call_gemini(
     model: str, prompt: str, images: list[Path] | None, temperature: float
 ) -> str:
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY is not set. Add it to .env")
-
     # The key travels as a header, never as a query parameter: a URL reaches
     # proxy logs, redirects and exception messages, a header does not.
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    headers = {"x-goog-api-key": GEMINI_API_KEY}
+    headers = {"x-goog-api-key": config.GEMINI_API_KEY}
 
     parts = [{"text": prompt}]
-    if images:
-        for img_path in images:
-            b64, mime = encode_image(img_path)
-            parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+    for img_path in images or []:
+        b64, mime = encode_image(img_path)
+        parts.append({"inline_data": {"mime_type": mime, "data": b64}})
 
     body = {
         "contents": [{"parts": parts}],
@@ -147,7 +136,10 @@ def _call_gemini(
 
     if "candidates" not in data or not data["candidates"]:
         raise RuntimeError(f"Gemini returned no candidates: {json.dumps(data)[:500]}")
-    parts = data["candidates"][0].get("content", {}).get("parts", [])
+    candidate = data["candidates"][0]
+    if candidate.get("finishReason") == "MAX_TOKENS":
+        raise _truncated("Gemini", "finishReason", "MAX_TOKENS")
+    parts = candidate.get("content", {}).get("parts", [])
     text = "".join(
         part["text"]
         for part in parts
@@ -161,22 +153,18 @@ def _call_gemini(
 def _call_openai(
     model: str, prompt: str, images: list[Path] | None, temperature: float
 ) -> str:
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY is not set. Add it to .env")
-
     url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+    headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}"}
 
     content = [{"type": "text", "text": prompt}]
-    if images:
-        for img_path in images:
-            b64, mime = encode_image(img_path)
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
-                }
-            )
+    for img_path in images or []:
+        b64, mime = encode_image(img_path)
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            }
+        )
 
     body = {
         "model": model,
@@ -191,32 +179,34 @@ def _call_openai(
 
     if "choices" not in data or not data["choices"]:
         raise RuntimeError(f"OpenAI returned no choices: {json.dumps(data)[:500]}")
-    return data["choices"][0]["message"]["content"]
+    choice = data["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise _truncated("OpenAI", "finish_reason", "length")
+    text = choice.get("message", {}).get("content")
+    if not isinstance(text, str) or not text:
+        raise RuntimeError("OpenAI returned no answer text")
+    return text
 
 
 def _call_anthropic(
     model: str, prompt: str, images: list[Path] | None, temperature: float
 ) -> str:
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY is not set. Add it to .env")
-
     url = "https://api.anthropic.com/v1/messages"
     headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
+        "x-api-key": config.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
 
     content = []
-    if images:
-        for img_path in images:
-            b64, mime = encode_image(img_path)
-            content.append(
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": mime, "data": b64},
-                }
-            )
+    for img_path in images or []:
+        b64, mime = encode_image(img_path)
+        content.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": b64},
+            }
+        )
     content.append({"type": "text", "text": prompt})
 
     body = {
@@ -231,6 +221,8 @@ def _call_anthropic(
     )
     data = response_data(resp)
 
+    if data.get("stop_reason") == "max_tokens":
+        raise _truncated("Anthropic", "stop_reason", "max_tokens")
     if "content" not in data or not data["content"]:
         raise RuntimeError(f"Anthropic returned no content: {json.dumps(data)[:500]}")
     text = "".join(
@@ -246,58 +238,77 @@ def _call_anthropic(
 def _call_ollama(
     model: str, prompt: str, images: list[Path] | None, temperature: float
 ) -> str:
-    url = f"{OLLAMA_BASE_URL}/api/generate"
-
-    image_list = []
-    if images:
-        for img_path in images:
-            b64, _ = encode_image(img_path)
-            image_list.append(b64)
+    url = f"{config.OLLAMA_BASE_URL}/api/generate"
 
     body = {
         "model": model,
         "prompt": prompt,
-        "images": image_list if image_list else None,
         "stream": False,
         "options": {"temperature": temperature},
     }
-    # Remove None values
-    body = {k: v for k, v in body.items() if v is not None}
+    if images:
+        body["images"] = [encode_image(img_path)[0] for img_path in images]
 
     resp = _request_with_retry("POST", url, json=body, timeout=LOCAL_TIMEOUT)
     data = response_data(resp)
 
+    if data.get("done_reason") == "length":
+        raise _truncated("Ollama", "done_reason", "length")
     if "response" not in data:
         raise RuntimeError(f"Ollama returned no response: {json.dumps(data)[:500]}")
     return data["response"]
 
 
+_ADAPTERS: dict[str, Callable[[str, str, list[Path] | None, float], str]] = {
+    "gemini": _call_gemini,
+    "openai": _call_openai,
+    "anthropic": _call_anthropic,
+    "ollama": _call_ollama,
+}
+
+
+def _retry_wait(response: requests.Response | None, attempt: int) -> float:
+    """Exponential backoff, lengthened by a numeric Retry-After, capped."""
+    headers = getattr(response, "headers", None) or {}
+    try:
+        server_delay = float(headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        server_delay = 0.0
+    return min(max(server_delay, BACKOFF_BASE * (2**attempt)), MAX_RETRY_WAIT)
+
+
 def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
-    """HTTP request with exponential backoff on rate limit errors."""
+    """Send one provider request, retrying only transient failures.
+
+    Every error that leaves this function is a RuntimeError with a redacted
+    message; "from None" drops the chained original, whose message and
+    traceback would carry the unredacted request back out.
+    """
     for attempt in range(MAX_RETRIES + 1):
+        final = attempt == MAX_RETRIES
+        response = None
         try:
-            resp = requests.request(method, url, **kwargs)
-            if resp.status_code == 429 and attempt < MAX_RETRIES:
-                wait = BACKOFF_BASE * (2**attempt)
-                print(
-                    f"  Rate limited. Waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})"
-                )
-                time.sleep(wait)
-                continue
-            try:
-                resp.raise_for_status()
-            except requests.exceptions.HTTPError as exc:
-                # "from None" suppresses the chained original, whose message
-                # and traceback would carry the unredacted request back out.
+            response = requests.request(method, url, **kwargs)
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as exc:
+            if final:
                 raise RuntimeError(redact_secrets(str(exc))) from None
-            return resp
-        except requests.exceptions.Timeout:
-            if attempt < MAX_RETRIES:
-                wait = BACKOFF_BASE * (2**attempt)
-                print(
-                    f"  Timeout. Retrying in {wait}s (attempt {attempt + 1}/{MAX_RETRIES})"
-                )
-                time.sleep(wait)
-                continue
-            raise
-    raise RuntimeError(f"All {MAX_RETRIES} retries exhausted for {redact_secrets(url)}")
+            reason = type(exc).__name__
+        else:
+            status = response.status_code
+            if final or not (status == 429 or 500 <= status < 600):
+                try:
+                    response.raise_for_status()
+                except requests.exceptions.HTTPError as exc:
+                    raise RuntimeError(redact_secrets(str(exc))) from None
+                return response
+            reason = f"HTTP {status}"
+        wait = _retry_wait(response, attempt)
+        print(
+            f"  WARNING {reason}; retrying in {wait:g}s "
+            f"(attempt {attempt + 1}/{MAX_RETRIES})",
+            file=sys.stderr,
+        )
+        time.sleep(wait)

@@ -163,7 +163,7 @@ def test_main_exits_nonzero_on_a_processing_error(monkeypatch, tmp_path):
     dirs = _prepare_dirs(monkeypatch, tmp_path)
     (dirs["validated"] / "broken.json").write_text("{ not json", encoding="utf-8")
     monkeypatch.setattr(step5, "ensure_dirs", lambda: None)
-    monkeypatch.setattr(step5, "read_knowledge", lambda _n: "# Projekt")
+    monkeypatch.setattr(step5, "project_info", lambda: {"title": "Projekt"})
     monkeypatch.setattr(sys, "argv", ["05_annotate_tei.py", "--all"])
 
     with pytest.raises(SystemExit) as exc:
@@ -189,7 +189,7 @@ def test_main_returns_cleanly_when_every_object_succeeds(
         json.dumps(fixture_validated, ensure_ascii=False), encoding="utf-8"
     )
     monkeypatch.setattr(step5, "ensure_dirs", lambda: None)
-    monkeypatch.setattr(step5, "read_knowledge", lambda _n: "# Projekt")
+    monkeypatch.setattr(step5, "project_info", lambda: {"title": "Projekt"})
     monkeypatch.setattr(sys, "argv", ["05_annotate_tei.py", "--all"])
 
     step5.main()

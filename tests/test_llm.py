@@ -1,8 +1,10 @@
-"""Runnable checks for the provider layer: key transport and key redaction.
+"""Runnable checks for the provider layer without network access.
 
-An API key must never reach a URL, an error string, or a file on disk. These
-checks pin down the Gemini header transport and the redaction helper that
-every error path in llm.py routes through.
+An API key must never reach a URL, an error string, or a file on disk. The
+checks pin the request shape of every adapter, the transient-failure retry
+policy, the detection of answers cut off at the token limit, and the
+deterministic JSON repair of model output. Synthetic payloads stand in for
+provider responses, because the tests must not call a provider.
 """
 
 import pytest
@@ -10,6 +12,7 @@ import requests
 
 from conftest import load_step
 
+config = load_step("config")
 llm = load_step("llm")
 
 SECRET = "AIzaTESTKEY0123456789"
@@ -18,10 +21,17 @@ SECRET = "AIzaTESTKEY0123456789"
 class _FakeResponse:
     """Minimal stand-in for requests.Response: status, payload, failure mode."""
 
-    def __init__(self, status_code: int = 200, payload: dict | None = None, error=None):
+    def __init__(
+        self,
+        status_code: int = 200,
+        payload: dict | None = None,
+        error=None,
+        headers: dict | None = None,
+    ):
         self.status_code = status_code
         self._payload = payload or {}
         self._error = error
+        self.headers = headers or {}
 
     def json(self) -> dict:
         return self._payload
@@ -29,32 +39,221 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         if self._error:
             raise self._error
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"{self.status_code} Error")
 
 
-def test_gemini_sends_the_key_as_header_not_query(monkeypatch):
+def _all_keys(monkeypatch) -> None:
+    for name in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.setattr(config, name, SECRET)
+
+
+ANSWERS = {
+    "gemini": {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    "openai": {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]},
+    "anthropic": {
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+    },
+    "ollama": {"response": "ok", "done_reason": "stop"},
+}
+
+
+@pytest.mark.parametrize(
+    ("provider", "url", "key_header", "temperature_path"),
+    [
+        (
+            "gemini",
+            "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent",
+            ("x-goog-api-key", SECRET),
+            ("generationConfig", "temperature"),
+        ),
+        (
+            "openai",
+            "https://api.openai.com/v1/chat/completions",
+            ("Authorization", f"Bearer {SECRET}"),
+            ("temperature",),
+        ),
+        (
+            "anthropic",
+            "https://api.anthropic.com/v1/messages",
+            ("x-api-key", SECRET),
+            ("temperature",),
+        ),
+        ("ollama", None, None, ("options", "temperature")),
+    ],
+)
+def test_request_shape_per_provider(
+    monkeypatch, provider, url, key_header, temperature_path
+):
     captured: dict = {}
 
-    def fake_request(method, url, **kwargs):
-        captured["url"] = url
-        captured["headers"] = kwargs.get("headers", {})
-        return _FakeResponse(
-            payload={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
-        )
+    def fake_request(method, request_url, **kwargs):
+        captured.update(method=method, url=request_url, **kwargs)
+        return _FakeResponse(payload=ANSWERS[provider])
 
-    monkeypatch.setattr(llm, "GEMINI_API_KEY", SECRET)
+    _all_keys(monkeypatch)
     monkeypatch.setattr(llm, "_request_with_retry", fake_request)
 
-    assert llm._call_gemini("m", "prompt", None, 0.1) == "ok"
+    assert llm.call_llm(provider, "m", "prompt") == "ok"
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == (url or f"{config.OLLAMA_BASE_URL}/api/generate")
     assert "key=" not in captured["url"]
     assert SECRET not in captured["url"]
-    assert captured["headers"]["x-goog-api-key"] == SECRET
+    headers = captured.get("headers", {})
+    if key_header:
+        assert headers[key_header[0]] == key_header[1]
+    else:
+        assert SECRET not in str(headers)
+    value = captured["json"]
+    for key in temperature_path:
+        value = value[key]
+    assert value == config.TEMPERATURE
+    if provider != "gemini":
+        assert captured["json"]["model"] == "m"
+
+
+def test_missing_key_fails_before_any_request(monkeypatch):
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(
+        llm, "_request_with_retry", lambda *a, **k: pytest.fail("request sent")
+    )
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        llm.call_llm("openai", "m", "prompt")
+
+
+def test_unknown_provider_is_rejected():
+    with pytest.raises(ValueError, match="Unknown provider"):
+        llm.call_llm("mistral", "m", "prompt")
+
+
+@pytest.mark.parametrize(
+    ("provider", "payload"),
+    [
+        (
+            "gemini",
+            {
+                "candidates": [
+                    {
+                        "finishReason": "MAX_TOKENS",
+                        "content": {"parts": [{"text": "{"}]},
+                    }
+                ]
+            },
+        ),
+        (
+            "openai",
+            {"choices": [{"message": {"content": "{"}, "finish_reason": "length"}]},
+        ),
+        (
+            "anthropic",
+            {"content": [{"type": "text", "text": "{"}], "stop_reason": "max_tokens"},
+        ),
+        ("ollama", {"response": "{", "done_reason": "length"}),
+    ],
+)
+def test_truncated_answer_raises_a_distinct_error(monkeypatch, provider, payload):
+    _all_keys(monkeypatch)
+    monkeypatch.setattr(
+        llm, "_request_with_retry", lambda *a, **k: _FakeResponse(payload=payload)
+    )
+
+    with pytest.raises(llm.TruncatedResponseError, match=provider.capitalize()[:4]):
+        llm.call_llm(provider, "m", "prompt")
+
+
+def _scripted_requests(monkeypatch, outcomes: list) -> list[float]:
+    """Replace the network with a fixed sequence of responses or exceptions."""
+    sleeps: list[float] = []
+    queue = list(outcomes)
+
+    def fake_request(method, url, **kwargs):
+        outcome = queue.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(llm.requests, "request", fake_request)
+    monkeypatch.setattr(llm.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def test_transient_failures_are_retried_with_backoff_and_retry_after(monkeypatch):
+    sleeps = _scripted_requests(
+        monkeypatch,
+        [
+            _FakeResponse(status_code=429, headers={"Retry-After": "30"}),
+            _FakeResponse(status_code=503),
+            requests.exceptions.ConnectionError("reset"),
+            requests.exceptions.Timeout("slow"),
+            _FakeResponse(payload={"ok": True}),
+        ],
+    )
+
+    response = llm._request_with_retry("POST", "https://host/api")
+
+    assert response.json() == {"ok": True}
+    base = llm.BACKOFF_BASE
+    assert sleeps == [30.0, base * 2, base * 4, base * 8]
+
+
+def test_retry_after_is_capped(monkeypatch):
+    sleeps = _scripted_requests(
+        monkeypatch,
+        [
+            _FakeResponse(status_code=429, headers={"Retry-After": "86400"}),
+            _FakeResponse(payload={}),
+        ],
+    )
+
+    llm._request_with_retry("POST", "https://host/api")
+
+    assert sleeps == [llm.MAX_RETRY_WAIT]
+
+
+def test_client_errors_are_not_retried(monkeypatch):
+    sleeps = _scripted_requests(monkeypatch, [_FakeResponse(status_code=400)])
+
+    with pytest.raises(RuntimeError, match="400"):
+        llm._request_with_retry("POST", "https://host/api")
+
+    assert sleeps == []
+
+
+def test_retries_are_bounded(monkeypatch):
+    sleeps = _scripted_requests(
+        monkeypatch,
+        [_FakeResponse(status_code=500)] * (llm.MAX_RETRIES + 1),
+    )
+
+    with pytest.raises(RuntimeError, match="500"):
+        llm._request_with_retry("POST", "https://host/api")
+
+    assert len(sleeps) == llm.MAX_RETRIES
+
+
+def test_exhausted_connection_errors_are_redacted(monkeypatch):
+    monkeypatch.setattr(config, "GEMINI_API_KEY", SECRET)
+    _scripted_requests(
+        monkeypatch,
+        [requests.exceptions.ConnectionError(f"refused ?key={SECRET}")]
+        * (llm.MAX_RETRIES + 1),
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        llm._request_with_retry("POST", "https://host/api")
+
+    assert SECRET not in str(exc.value)
+    assert exc.value.__cause__ is None
 
 
 def test_redact_removes_query_key_and_known_key_value(monkeypatch):
-    monkeypatch.setattr(llm, "GEMINI_API_KEY", SECRET)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", SECRET)
     text = f"401 for https://host/v1beta/models/m:generateContent?key={SECRET}&alt=json"
 
-    out = llm.redact_secrets(text)
+    out = config.redact_secrets(text)
 
     assert SECRET not in out
     assert "key=[redacted]" in out
@@ -62,12 +261,12 @@ def test_redact_removes_query_key_and_known_key_value(monkeypatch):
 
 
 def test_redact_removes_a_bare_key_value_without_query_syntax(monkeypatch):
-    monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", SECRET)
-    assert SECRET not in llm.redact_secrets(f"header x-api-key: {SECRET} rejected")
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", SECRET)
+    assert SECRET not in config.redact_secrets(f"header x-api-key: {SECRET} rejected")
 
 
 def test_http_error_from_provider_is_reraised_without_the_key(monkeypatch):
-    monkeypatch.setattr(llm, "GEMINI_API_KEY", SECRET)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", SECRET)
     error = requests.exceptions.HTTPError(
         f"401 Client Error for url: https://host/m:generateContent?key={SECRET}"
     )
@@ -82,3 +281,17 @@ def test_http_error_from_provider_is_reraised_without_the_key(monkeypatch):
 
     assert SECRET not in str(exc.value)
     assert SECRET not in repr(exc.value.__cause__)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"pages": []}', {"pages": []}),
+        ('```json\n{"a": 1}\n```', {"a": 1}),
+        ("```\n[1, 2]\n```", [1, 2]),
+        ('{\n"text": "erste\nzweite"\n}', {"text": "erste\nzweite"}),
+        ("Keine JSON-Antwort", None),
+    ],
+)
+def test_parse_json_response_repairs_fences_and_raw_newlines(text, expected):
+    assert llm.parse_json_response(text) == expected

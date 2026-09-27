@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import hashlib
 import json
 import re
 import sys
@@ -34,8 +33,8 @@ from config import (
     VALIDATED_DIR,
     ensure_dirs,
     ordered_page_images,
+    project_info,
     provenance_meta,
-    read_knowledge,
     source_image_state,
     source_image_state_hash,
     write_errors,
@@ -83,51 +82,7 @@ def _date_when(value: str) -> str:
 
 def _stable_hash(value: object) -> str:
     """Hash one JSON-compatible configuration value deterministically."""
-    serialized = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
-
-
-# ---------------------------------------------------------------------------
-# Project metadata extraction from knowledge/01_PROJECT.md
-# ---------------------------------------------------------------------------
-
-
-def _extract_project_info(md_text: str) -> dict:
-    """Pull structured fields out of the 01_PROJECT.md markdown table.
-
-    Looks for key-value rows in markdown tables (| Key | Value |) and
-    falls back to the first H1/H2 heading for the title.
-    """
-    info: dict[str, str] = {}
-
-    # Try to find markdown table rows: | key | value |
-    for match in re.finditer(r"^\|\s*(.+?)\s*\|\s*(.+?)\s*\|", md_text, re.MULTILINE):
-        key = match.group(1).strip().lower()
-        val = match.group(2).strip()
-        if val == "---" or key == "---":
-            continue
-        if "projektname" in key or "title" in key or "titel" in key:
-            info["title"] = val
-        elif "herausgeber" in key or "editor" in key:
-            info["editor"] = val
-        elif "institution" in key or "publisher" in key or "verlag" in key:
-            info["publisher"] = val
-        elif "lizenz" in key or "license" in key:
-            info["license"] = val
-        elif "sprache" in key or "language" in key or "lang" in key:
-            info["language"] = val
-        elif "editionstyp" in key or "edition type" in key:
-            info["edition_type"] = val
-
-    # Fallback: first heading
-    if "title" not in info:
-        heading = re.search(r"^#{1,2}\s+(.+)", md_text, re.MULTILINE)
-        if heading:
-            info["title"] = heading.group(1).strip()
-
-    return info
+    return contract.canonical_hash(value)
 
 
 # ---------------------------------------------------------------------------
@@ -403,12 +358,7 @@ def _build_body(
     return "\n".join(body_lines)
 
 
-REVIEW_STATUS_ORDER = (
-    "machine_unreviewed",
-    "in_review",
-    "human_verified",
-    "accepted",
-)
+REVIEW_STATUS_ORDER = contract.REVIEW_STATUSES
 
 
 def document_review_status(pages: list[dict]) -> str:
@@ -862,8 +812,7 @@ def main():
     ensure_dirs()
 
     # Load project info once
-    project_md = read_knowledge("01_PROJECT.md")
-    project = _extract_project_info(project_md)
+    project = project_info()
 
     objects = collect_objects(args.object, args.all, args.sample)
 
@@ -877,7 +826,7 @@ def main():
             errors.append(err)
             print(f"  FAIL {err['object_id']}: {err['error']}")
 
-    write_errors(errors, TEI_DIR)
+    write_errors(errors, TEI_DIR, "05_annotate_tei.py")
     if errors:
         print(f"\n{len(errors)} error(s) written to {TEI_DIR / 'errors.json'}")
 

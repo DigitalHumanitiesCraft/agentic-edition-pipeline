@@ -1,81 +1,21 @@
-"""Validate edit chains and expose explicitly bound dependency state."""
+"""Expose explicitly bound dependency state and record review edits in TEI."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
-from uuid import UUID
 
 from lxml import etree
 
-TEI = "http://www.tei-c.org/ns/1.0"
-XML = "http://www.w3.org/XML/1998/namespace"
-NS = {"tei": TEI}
-
-
-def edit_violations(page: dict) -> list[str]:
-    """Check the optional chain without inventing a pre-existing raw state."""
-    edits = page.get("edits", [])
-    if not isinstance(edits, list):
-        return ["edits is not a list"]
-    problems = []
-    previous = None
-    previous_time = None
-    ids = set()
-    for edit in edits:
-        if not isinstance(edit, dict):
-            return ["edit is not an object"]
-        try:
-            UUID(edit["id"])
-            timestamp = datetime.fromisoformat(edit["timestamp"])
-            if timestamp.tzinfo is None:
-                raise ValueError("timestamp requires timezone")
-            if previous_time is not None and timestamp < previous_time:
-                problems.append("edit timestamps are not chronological")
-            previous_time = timestamp
-        except (KeyError, TypeError, ValueError, AttributeError):
-            problems.append("edit requires a UUID and timezone-aware timestamp")
-        identifier = edit.get("id")
-        if not isinstance(identifier, str):
-            return [*problems, "edit id is not a string"]
-        if identifier in ids:
-            problems.append("duplicate edit id")
-        ids.add(identifier)
-        if not isinstance(edit.get("actor_kind"), str) or edit["actor_kind"] not in {
-            "human",
-            "agent",
-        }:
-            problems.append("unknown edit actor_kind")
-        for key in ("actor", "note"):
-            if not isinstance(edit.get(key), str) or not edit[key].strip():
-                problems.append(f"edit {key} is required")
-        for key in ("before", "after"):
-            value = edit.get(key)
-            if not isinstance(value, dict) or set(value) != {"transcription", "notes"}:
-                return [*problems, f"edit {key} requires transcription and notes"]
-            if not all(isinstance(text, str) for text in value.values()):
-                return [*problems, f"edit {key} must contain strings"]
-        if previous is not None and edit["before"] != previous:
-            problems.append("edit chain is discontinuous")
-        if edit["before"] == edit["after"]:
-            problems.append("edit does not change the page")
-        previous = edit["after"]
-    if edits and previous != {
-        "transcription": page.get("transcription"),
-        "notes": page.get("notes", ""),
-    }:
-        problems.append("edit chain does not match current page")
-    return problems
+import contract
+from config import NS, safe_xml_parser
+from config import TEI_NS as TEI
+from config import XML_NS as XML
 
 
 def canonical_sha256(data: dict) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            data, sort_keys=True, ensure_ascii=False, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()
+    return contract.canonical_hash(data, length=None)
 
 
 def dependencies(root: Path, object_id: str, data: dict) -> list[dict]:
@@ -112,9 +52,7 @@ def add_tei_edits(xml: str, pages: list[dict]) -> str:
     )
     if not events:
         return xml
-    root = etree.fromstring(
-        xml.encode("utf-8"), etree.XMLParser(resolve_entities=False, no_network=True)
-    )
+    root = etree.fromstring(xml.encode("utf-8"), safe_xml_parser())
     title = root.find(".//tei:titleStmt", NS)
     revision = root.find(".//tei:revisionDesc", NS)
     actors = {}

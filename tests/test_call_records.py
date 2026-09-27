@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import config
 import llm
 from call_records import recording
 
@@ -35,7 +36,7 @@ def test_full_gemini_response_and_multipart_answer(tmp_path, monkeypatch):
         def json(self):
             return payload
 
-    monkeypatch.setattr(llm, "GEMINI_API_KEY", "secret-fixture")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "secret-fixture")
     monkeypatch.setattr(llm, "_request_with_retry", lambda *a, **k: Response())
     path = tmp_path / "record.json"
     with recording(path, {"prompt": "A secret-fixture"}) as record:
