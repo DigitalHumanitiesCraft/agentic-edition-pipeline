@@ -1,12 +1,21 @@
-"""Analyze source data and produce an inventory.
+"""Analyze source data and produce an inventory (step 2).
 
-Walks data/sources/ and data/processed/images/ to build a structured inventory
-of all documents in the project. The inventory is the single source of truth
-for downstream pipeline steps -- they read inventory.json to know what to
-process, rather than scanning the filesystem themselves.
+Flat script-pipeline regime. Walks data/sources/, merges the optional source
+manifest data/sources/manifest.json and adds materialized page images from
+data/processed/images/ to build data/inventory.json. The inventory is the
+single source of truth for downstream steps, which read it to know what to
+process rather than scanning the filesystem themselves.
+
+Each document carries a transcribable flag. Only page images (PDF, image
+folders, remote or extracted facsimiles) reach step 3. Text, XML, DOCX and
+transcription-JSON sources are inventoried, but no supplied step converts
+them, so step 3 leaves documents flagged false out of its selection.
 
 Optionally updates knowledge/02_DATA.md with a human-readable summary between
 INVENTAR_START / INVENTAR_END markers, so the knowledge document stays in sync.
+
+Usage:
+    uv run python pipeline/02_analyze.py [--update-knowledge] [--format markdown]
 """
 
 from __future__ import annotations
@@ -14,23 +23,26 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 import contract
 from config import (
-    DATA_DIR,
     IMAGES_DIR,
+    INVENTORY_PATH,
     KNOWLEDGE_DIR,
     PROCESSED_DIR,
     SOURCES_DIR,
+    configure_console,
     ensure_dirs,
     list_page_images,
     provenance_meta,
+    read_image_manifest,
+    read_json,
     write_json_atomic,
     write_text_atomic,
 )
 
-INVENTORY_PATH = DATA_DIR / "inventory.json"
 SOURCE_MANIFEST_NAME = "manifest.json"
 # File extensions grouped by source type
 EXT_MAP: dict[str, str] = {
@@ -45,6 +57,18 @@ EXT_MAP: dict[str, str] = {
     ".docx": "docx",
     ".json": "transcription",
 }
+# Source types whose pages step 3 can read as images once they are local.
+IMAGE_SOURCE_TYPES = frozenset({"pdf", "image", "remote_images", "extracted_image"})
+
+
+def _check_collision(known: Iterable[str], doc_id: str) -> None:
+    """Raise when doc_id differs from a known ID only by letter case."""
+    folded = doc_id.casefold()
+    for other in known:
+        if other != doc_id and other.casefold() == folded:
+            raise ValueError(
+                f"source document ids collide across filesystems: {other!r}, {doc_id!r}"
+            )
 
 
 def _count_json_pages(path: Path) -> int:
@@ -54,8 +78,8 @@ def _count_json_pages(path: Path) -> int:
     See knowledge/08_DATA_CONTRACT.md for the schema.
     """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        data = read_json(path)
+    except (OSError, ValueError):
         return 1
     if not isinstance(data, dict):
         return 1
@@ -109,14 +133,7 @@ def scan_sources() -> dict[str, dict]:
                 f"invalid source document id derived from {path}: {doc_id!r}"
             )
 
-        collision = next(
-            (known for known in documents if known.casefold() == doc_id.casefold()),
-            None,
-        )
-        if collision is not None and collision != doc_id:
-            raise ValueError(
-                f"source document ids collide across filesystems: {collision!r}, {doc_id!r}"
-            )
+        _check_collision(documents, doc_id)
 
         if doc_id not in documents:
             documents[doc_id] = {
@@ -189,8 +206,8 @@ def merge_source_manifest(documents: dict[str, dict]) -> dict[str, dict]:
         return documents
 
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        manifest = read_json(manifest_path)
+    except (OSError, ValueError) as exc:
         raise ValueError(f"cannot read source manifest {manifest_path}: {exc}") from exc
     records = manifest.get("documents") if isinstance(manifest, dict) else None
     if not isinstance(manifest, dict) or manifest.get("version") != "0.1":
@@ -199,7 +216,6 @@ def merge_source_manifest(documents: dict[str, dict]) -> dict[str, dict]:
         raise ValueError("source manifest must contain a documents list")
 
     seen: set[str] = set()
-    seen_casefold = {doc_id.casefold(): doc_id for doc_id in documents}
     for record in records:
         if not isinstance(record, dict):
             raise ValueError("every source manifest document must be an object")
@@ -208,13 +224,9 @@ def merge_source_manifest(documents: dict[str, dict]) -> dict[str, dict]:
             raise ValueError(f"invalid source manifest document id: {doc_id!r}")
         if doc_id in seen:
             raise ValueError(f"duplicate source manifest document id: {doc_id}")
-        collision = seen_casefold.get(doc_id.casefold())
-        if collision is not None and collision != doc_id:
-            raise ValueError(
-                f"source document ids collide across filesystems: {collision!r}, {doc_id!r}"
-            )
+        # Every earlier manifest record is already an entry of documents.
+        _check_collision(documents, doc_id)
         seen.add(doc_id)
-        seen_casefold[doc_id.casefold()] = doc_id
 
         metadata = record.get("metadata", {})
         metadata_problems = contract.metadata_violations(
@@ -277,8 +289,9 @@ def _dominant_format(doc_dir: Path) -> str:
 def scan_extracted_images(documents: dict[str, dict]) -> dict[str, dict]:
     """Augment documents with info from data/processed/images/ (extracted PDFs).
 
-    Each subdirectory under IMAGES_DIR corresponds to a document. If a manifest
-    exists, use it for page count; otherwise count the page images. The image
+    Each subdirectory under IMAGES_DIR corresponds to a document. A manifest
+    is verified by config.read_image_manifest, including the page hashes, and
+    gives the page count; without one the page images are counted. The image
     type follows the directory, because PDF extraction writes PNG while
     fetch_facsimiles.py writes JPG.
     """
@@ -291,48 +304,9 @@ def scan_extracted_images(documents: dict[str, dict]) -> dict[str, dict]:
         doc_id = doc_dir.name
         if not contract.valid_object_id(doc_id):
             raise ValueError(f"invalid processed image document id: {doc_id!r}")
-        collision = next(
-            (known for known in documents if known.casefold() == doc_id.casefold()),
-            None,
-        )
-        if collision is not None and collision != doc_id:
-            raise ValueError(
-                f"source document ids collide across filesystems: {collision!r}, {doc_id!r}"
-            )
-        manifest_path = doc_dir / "manifest.json"
-
-        page_count = 0
-        if manifest_path.exists():
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as exc:
-                raise ValueError(
-                    f"cannot read image manifest {manifest_path}: {exc}"
-                ) from exc
-            pages = manifest.get("pages") if isinstance(manifest, dict) else None
-            if not isinstance(pages, list):
-                raise ValueError(
-                    f"image manifest {manifest_path} carries no pages list"
-                )
-            for index, page in enumerate(pages, start=1):
-                if not isinstance(page, dict) or page.get("page") != index:
-                    raise ValueError(
-                        f"image manifest {manifest_path} has an invalid page entry at {index}"
-                    )
-                if "error" in page:
-                    raise ValueError(
-                        f"image manifest {manifest_path} records an error on page {index}"
-                    )
-                filename = page.get("filename")
-                if (
-                    not isinstance(filename, str)
-                    or Path(filename).name != filename
-                    or not (doc_dir / filename).is_file()
-                ):
-                    raise ValueError(
-                        f"image manifest {manifest_path} has no usable file for page {index}"
-                    )
-            page_count = len(pages)
+        _check_collision(documents, doc_id)
+        if (doc_dir / "manifest.json").exists():
+            page_count = len(read_image_manifest(doc_dir)[1])
         else:
             page_count = len(list_page_images(doc_dir))
 
@@ -395,6 +369,11 @@ def build_inventory(documents: dict[str, dict]) -> dict:
             entry["metadata"] = doc["metadata"]
         if doc.get("prompt_profile"):
             entry["prompt_profile"] = doc["prompt_profile"]
+        entry["transcribable"] = (
+            doc["source_type"] in IMAGE_SOURCE_TYPES
+            or bool(doc.get("materialized_pages"))
+            or bool(doc.get("metadata", {}).get("image_urls"))
+        )
         doc_list.append(entry)
 
     return {
@@ -416,12 +395,14 @@ def inventory_to_markdown(inventory: dict) -> str:
         "",
         "### Dokumente",
         "",
-        "| ID | Typ | Seiten | Format | Pfad |",
-        "|---|---|---|---|---|",
+        "| ID | Typ | Seiten | Format | Pfad | Schritt 3 |",
+        "|---|---|---|---|---|---|",
     ]
     for doc in inventory["documents"]:
+        step3 = "ja" if doc["transcribable"] else "nein, keine Seitenbilder"
         lines.append(
-            f"| {doc['id']} | {doc['source_type']} | {doc['pages']} | {doc['format']} | {doc['path']} |"
+            f"| {doc['id']} | {doc['source_type']} | {doc['pages']} | {doc['format']} "
+            f"| {doc['path']} | {step3} |"
         )
     return "\n".join(lines)
 
@@ -450,7 +431,8 @@ def update_knowledge(markdown_block: str) -> None:
     print(f"  Updated {data_md_path}")
 
 
-def main():
+def main() -> None:
+    configure_console()
     parser = argparse.ArgumentParser(
         description="Analyze source data and create inventory."
     )
@@ -469,22 +451,12 @@ def main():
 
     ensure_dirs()
 
-    print("Scanning data/sources/ ...")
     try:
+        print("Scanning data/sources/ ...")
         documents = scan_sources()
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
-    print(f"  Found {len(documents)} document(s) in sources")
-
-    try:
+        print(f"  Found {len(documents)} document(s) in sources")
         documents = merge_source_manifest(documents)
-    except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    print("Scanning data/processed/images/ ...")
-    try:
+        print("Scanning data/processed/images/ ...")
         documents = scan_extracted_images(documents)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -493,8 +465,6 @@ def main():
 
     inventory = build_inventory(documents)
 
-    # Always write inventory.json
-    INVENTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(INVENTORY_PATH, inventory)
     print(f"\nInventory written to {INVENTORY_PATH}")
 

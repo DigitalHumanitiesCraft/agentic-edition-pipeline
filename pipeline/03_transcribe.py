@@ -1,61 +1,95 @@
-"""Transcribe document images via LLM API.
+"""Transcribe document images via an LLM provider (step 3).
 
-Reads the inventory to discover documents, loads page images, sends them to
-the configured LLM provider with a transcription prompt, and writes structured
-JSON output per document. Supports chunking for documents with many pages
-(API context limits) and includes basic quality signals in the output.
+Flat script-pipeline regime. Reads data/inventory.json, resolves each
+document's page images through config.ordered_page_images, assembles the
+layered prompt (base rules, optional material profile, inventory metadata,
+optional per-object instructions) and writes
+data/processed/transcriptions/{id}.json according to
+knowledge/08_DATA_CONTRACT.md.
 
-Designed for batch processing with rate-limit awareness: --delay controls
-inter-document pause, --chunk-size controls how many images go into one API
-call. The retry-with-JSON-hint pattern handles models that occasionally return
-prose instead of JSON on the first attempt.
+Every document runs through the same chunk loop, also when it fits into one
+chunk. A chunk is served from a verified chunk-cache entry or sent to the
+provider; an unparseable answer gets one retry with a JSON hint, a truncated
+answer gets none, because a second call would be cut off at the same limit.
+Each chunk answer must satisfy the contract for exactly its page range
+before it is cached, and the chunks are always merged, so confidence and
+notes follow one rule regardless of the chunk count. The assembled file is
+checked once more against the full contract before it is written. Its
+metadata is the authoritative inventory metadata alone: the prompt asks the
+model for none, and a model-proposed title would otherwise reach the TEI
+title unmarked.
+
+Helpers raise config.ItemFailure(stage, message); transcribe_document turns
+it into the error record, and main collects the records through finish_run.
+Call records land in data/processed/llm-calls/{id}/ and verified chunks in
+data/processed/chunk-cache/{id}/ (knowledge/provider-records.md).
+
+Usage:
+    uv run python pipeline/03_transcribe.py --object ID [--force]
+    uv run python pipeline/03_transcribe.py --all --sample 2 [--dry-run]
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import re
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import contract
 from call_records import recording
 from config import (
     BATCH_DELAY,
+    CHUNK_CACHE_DIR,
     CHUNK_SIZE,
-    DATA_DIR,
+    INVENTORY_PATH,
+    LLM_CALLS_DIR,
     PROMPTS_DIR,
     TEMPERATURE,
     TRANSCRIPTION_MODEL,
     TRANSCRIPTION_PROVIDER,
     TRANSCRIPTIONS_DIR,
+    ItemFailure,
+    add_selection_args,
+    configure_console,
     ensure_dirs,
+    finish_run,
     load_prompt,
-    missing_api_key,
     ordered_page_images,
     provenance_meta,
-    provider_config_error,
+    read_json,
     redact_secrets,
+    require_provider,
+    select_ids,
     source_image_state,
     source_image_state_hash,
-    write_errors,
     write_json_atomic,
 )
 from contract import compute_quality_signals
-from llm import call_llm, parse_json_response
-from review_state import canonical_sha256
+from llm import TruncatedResponseError, call_llm, parse_json_response
 
-INVENTORY_PATH = DATA_DIR / "inventory.json"
 PROMPT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+CACHE_VERSION = 1
+JSON_RETRY_SUFFIX = "\n\nIMPORTANT: Respond with valid JSON only."
+# Contract vocabulary of the confidence field, weakest first. A merge across
+# chunks keeps the weakest declared value, because a document is only as
+# reliable as its worst chunk.
+CONFIDENCE_ORDER = ("low", "medium", "high")
 
 
-def _metadata_hash(metadata: dict) -> str:
-    """Hash the complete authoritative inventory metadata."""
-    return contract.canonical_hash(metadata)
+@dataclass(frozen=True)
+class PreparedDocument:
+    """Everything a document run needs once its inputs have passed the checks."""
+
+    doc_id: str
+    metadata: dict
+    images: list[Path]
+    image_state: list[dict]
+    prompt: str
+    prompt_info: dict
 
 
 def _has_review_history(data: object) -> bool:
@@ -70,9 +104,14 @@ def _has_review_history(data: object) -> bool:
     )
 
 
-# ---------------------------------------------------------------------------
-# Image discovery
-# ---------------------------------------------------------------------------
+def _processed_path(directory: Path, doc_id: str) -> Path:
+    """Return the per-object folder of directory beside the transcriptions.
+
+    executed_prompts[].record is relative to the processed root, so the chunk
+    cache and the call records follow TRANSCRIPTIONS_DIR's parent and stay
+    together with the transcriptions when that directory is redirected.
+    """
+    return TRANSCRIPTIONS_DIR.parent / directory.name / doc_id
 
 
 def find_images_for_document(doc: dict) -> list[Path]:
@@ -93,11 +132,6 @@ def find_images_for_document(doc: dict) -> list[Path]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Prompt assembly
-# ---------------------------------------------------------------------------
-
-
 def _prompt_component(value: object, field: str) -> str:
     """Return a path-safe prompt key or raise at the prompt trust boundary."""
     if not isinstance(value, str) or not PROMPT_KEY.fullmatch(value):
@@ -108,8 +142,9 @@ def _prompt_component(value: object, field: str) -> str:
 def assemble_prompt(doc: dict, base_prompt: str) -> tuple[str, dict]:
     """Build the runtime prompt from profile, metadata and object layers.
 
-    The manifest selects a profile explicitly. Missing declared profile files
-    fail the document instead of silently falling back to the base prompt.
+    The manifest selects a profile explicitly. A declared profile without
+    its own file fails the document instead of silently falling back to the
+    base prompt; profiles/README.md documents the folder and is no profile.
     """
     doc_id = _prompt_component(doc.get("id"), "document id")
     metadata = doc.get("metadata", {})
@@ -122,7 +157,11 @@ def assemble_prompt(doc: dict, base_prompt: str) -> tuple[str, dict]:
     if profile:
         profile = _prompt_component(profile, "prompt_profile")
         profile_path = PROMPTS_DIR / "profiles" / f"{profile}.md"
-        if not profile_path.exists():
+        if profile.casefold() == "readme":
+            raise ValueError(
+                "prompt_profile 'README' names the profile folder's documentation"
+            )
+        if not profile_path.is_file():
             raise FileNotFoundError(
                 f"declared prompt profile not found: {profile_path}"
             )
@@ -162,10 +201,7 @@ def assemble_prompt(doc: dict, base_prompt: str) -> tuple[str, dict]:
         layers.append(f"objects/{doc_id}.md")
 
     prompt = "\n\n".join(section.strip() for section in sections if section.strip())
-    info = {
-        "prompt_layers": layers,
-        "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
-    }
+    info = {"prompt_layers": layers, "prompt_hash": contract.text_hash(prompt)}
     if profile:
         info["prompt_profile"] = profile
     return prompt, info
@@ -182,9 +218,93 @@ def initialize_machine_pages(pages: list[dict]) -> list[dict]:
     return initialized
 
 
-# ---------------------------------------------------------------------------
-# Chunked transcription
-# ---------------------------------------------------------------------------
+def _prepare(doc: dict, base_prompt: str) -> PreparedDocument:
+    """Check the inventory record, find its images and assemble its prompt."""
+    doc_id = doc.get("id")
+    if not contract.valid_object_id(doc_id):
+        raise ItemFailure(
+            "contract", "inventory object_id is not a path-safe identifier"
+        )
+    metadata = doc.get("metadata", {})
+    problems = contract.metadata_violations(metadata, prefix="inventory metadata")
+    if problems:
+        raise ItemFailure(
+            "contract", "Input violates the data contract: " + "; ".join(problems)
+        )
+    try:
+        images = find_images_for_document(doc)
+        image_state = source_image_state(images)
+    except (OSError, ValueError) as exc:
+        raise ItemFailure("discovery", str(exc)) from exc
+    if not images:
+        raise ItemFailure("discovery", "No images found")
+    try:
+        prompt, prompt_info = assemble_prompt(doc, base_prompt)
+    except (OSError, ValueError) as exc:
+        raise ItemFailure("prompt", str(exc)) from exc
+    return PreparedDocument(doc_id, metadata, images, image_state, prompt, prompt_info)
+
+
+def _existing_output_is_current(
+    out_path: Path,
+    prepared: PreparedDocument,
+    provider: str,
+    model: str,
+    force: bool,
+) -> bool:
+    """Decide what an existing transcription allows before any provider call.
+
+    Returns True when a non-forced run can keep it, False when there is none
+    or --force may replace it. Raises ItemFailure when it is unreadable,
+    stale, or carries human review history that --force would destroy.
+    """
+    if not out_path.exists():
+        return False
+    try:
+        existing = read_json(out_path)
+    except (OSError, ValueError) as exc:
+        raise ItemFailure(
+            "stale",
+            f"Existing transcription is unreadable: {exc}; retain and repair or "
+            "rename it before starting a new model run",
+        ) from exc
+    problems = contract.file_violations(existing)
+    if force:
+        if problems:
+            raise ItemFailure(
+                "stale",
+                "Refusing --force because the existing transcription is not "
+                "contract-conformant; retain and repair or rename it",
+            )
+        if _has_review_history(existing):
+            raise ItemFailure(
+                "review_history",
+                "Refusing --force because the existing transcription contains "
+                "human review history; retain it and use a new object identifier "
+                "for a new model run",
+            )
+        return False
+    meta = existing.get("_meta", {}) if isinstance(existing, dict) else {}
+    info = prepared.prompt_info
+    current = (
+        not problems
+        and existing.get("object_id") == prepared.doc_id
+        and meta.get("pipeline_step") == 3
+        and meta.get("provider") == provider
+        and meta.get("model") == model
+        and meta.get("prompt_hash") == info["prompt_hash"]
+        and meta.get("prompt_layers") == info["prompt_layers"]
+        and meta.get("prompt_profile") == info.get("prompt_profile")
+        and meta.get("source_images_hash")
+        == source_image_state_hash(prepared.image_state)
+        and meta.get("source_metadata_hash")
+        == contract.canonical_hash(prepared.metadata)
+    )
+    if current:
+        return True
+    raise ItemFailure(
+        "stale", "Existing transcription is stale or invalid; rerun with --force"
+    )
 
 
 def transcribe_chunk(
@@ -195,123 +315,281 @@ def transcribe_chunk(
     doc_id: str,
     chunk_index: int,
     start_page: int,
-) -> tuple[dict | None, list[dict]]:
-    """Transcribe one chunk and record every executed prompt hash."""
+    provider_calls: list[dict] | None = None,
+) -> tuple[dict | list | None, list[dict]]:
+    """Call the provider for one chunk and log every executed prompt.
+
+    Returns the parsed answer (None when even the JSON retry is unparseable)
+    and the call entries for _meta.executed_prompts. Each call is appended
+    to provider_calls before it starts. Provider failures raise ItemFailure
+    with stage "api_call", a truncated answer with stage "truncated".
+    """
     end_page = start_page + len(images) - 1
-    context = (
-        f"Document: {doc_id}, chunk {chunk_index + 1}, source pages "
-        f"{start_page}-{end_page}. Number the returned pages from {start_page}."
+    pages = list(range(start_page, end_page + 1))
+    full_prompt = (
+        f"{system_prompt}\n\nDocument: {doc_id}, chunk {chunk_index + 1}, source "
+        f"pages {start_page}-{end_page}. Number the returned pages from {start_page}."
     )
-    full_prompt = f"{system_prompt}\n\n{context}"
+    image_state = source_image_state(images)
+    calls: list[dict] = []
 
-    calls = [
-        {
+    def execute(prompt: str) -> str:
+        path = _processed_path(LLM_CALLS_DIR, doc_id) / f"{uuid.uuid4().hex}.json"
+        call = {
             "chunk": chunk_index + 1,
-            "pages": list(range(start_page, end_page + 1)),
-            "attempt": 1,
-            "prompt_hash": hashlib.sha256(full_prompt.encode("utf-8")).hexdigest()[:12],
+            "pages": list(pages),
+            "attempt": len(calls) + 1,
+            "prompt_hash": contract.text_hash(prompt),
+            "record": f"{LLM_CALLS_DIR.name}/{doc_id}/{path.name}",
         }
-    ]
+        calls.append(call)
+        if provider_calls is not None:
+            provider_calls.append(call)
+        metadata = {
+            "provider": provider,
+            "model": model,
+            "temperature": TEMPERATURE,
+            "prompt": prompt,
+            "images": image_state,
+            **call,
+        }
+        # "from None" keeps the unredacted provider message out of the chain.
+        try:
+            with recording(path, metadata) as record:
+                record["answer"] = call_llm(provider, model, prompt, images)
+        except TruncatedResponseError as exc:
+            raise ItemFailure(
+                "truncated", f"chunk {chunk_index + 1}: {redact_secrets(str(exc))}"
+            ) from None
+        except Exception as exc:
+            raise ItemFailure("api_call", redact_secrets(str(exc))) from None
+        return record["answer"]
 
-    def execute(prompt: str, call: dict) -> str:
-        path = (
-            TRANSCRIPTIONS_DIR.parent
-            / "llm-calls"
-            / doc_id
-            / f"{uuid.uuid4().hex}.json"
-        )
-        call["record"] = path.relative_to(TRANSCRIPTIONS_DIR.parent).as_posix()
-        with recording(
-            path,
-            {
-                "provider": provider,
-                "model": model,
-                "temperature": TEMPERATURE,
-                "prompt": prompt,
-                "images": source_image_state(images),
-                **call,
-            },
-        ) as record:
-            answer = call_llm(provider, model, prompt, images)
-            record["answer"] = answer
-            return answer
-
-    raw = execute(full_prompt, calls[-1])
-    result = parse_json_response(raw)
-
+    result = parse_json_response(execute(full_prompt))
     if result is None:
-        # Retry once with an explicit JSON hint -- some models need the nudge
-        retry_prompt = full_prompt + "\n\nIMPORTANT: Respond with valid JSON only."
-        calls.append(
-            {
-                "chunk": chunk_index + 1,
-                "pages": list(range(start_page, end_page + 1)),
-                "attempt": 2,
-                "prompt_hash": hashlib.sha256(retry_prompt.encode("utf-8")).hexdigest()[
-                    :12
-                ],
-            }
-        )
-        raw = execute(retry_prompt, calls[-1])
-        result = parse_json_response(raw)
-
+        result = parse_json_response(execute(full_prompt + JSON_RETRY_SUFFIX))
     return result, calls
 
 
-# Contract vocabulary of the confidence field, weakest first. A merge across
-# chunks keeps the weakest declared value, because a document is only as
-# reliable as its worst chunk.
-CONFIDENCE_ORDER = ("low", "medium", "high")
+def _chunk_violations(result: object, expected: list[int]) -> list[str]:
+    """Check one chunk answer against the contract for its page range.
+
+    Beyond contract.response_violations it rejects confidence values outside
+    the vocabulary (letter case aside) and non-string notes, so merge_chunks
+    never has to drop or guess a value.
+    """
+    problems = contract.response_violations(
+        result, expected_pages=len(expected), expected_numbers=expected
+    )
+    if not isinstance(result, dict):
+        return problems
+    confidence = result.get("confidence")
+    if confidence is not None and (
+        not isinstance(confidence, str)
+        or confidence.strip().lower() not in contract.CONFIDENCE_VALUES
+    ):
+        problems.append(f"confidence has an unknown value: {confidence!r}")
+    notes = result.get("confidence_notes")
+    if notes is not None and not isinstance(notes, str):
+        problems.append("confidence_notes is not a string")
+    return problems
 
 
-def _worst_confidence(chunks: list[dict]) -> str:
-    """The weakest confidence value any chunk declared, or "" if none did."""
-    declared = [
-        chunk["confidence"].lower()
-        for chunk in chunks
-        if isinstance(chunk.get("confidence"), str)
-        and chunk["confidence"].lower() in CONFIDENCE_ORDER
-    ]
-    if not declared:
-        return ""
-    return min(declared, key=CONFIDENCE_ORDER.index)
+def _cached_chunk(
+    prepared: PreparedDocument,
+    chunk_images: list[Path],
+    index: int,
+    start: int,
+    provider: str,
+    model: str,
+    force: bool,
+    provider_calls: list[dict] | None,
+) -> tuple[dict, list[dict]]:
+    """Return one verified chunk answer from the cache or from a provider call.
+
+    The cache identity binds prompt, metadata, provider, model, temperature,
+    image bytes and page range. An unreadable or contradictory entry blocks
+    the document (stage "cache") rather than triggering a paid call.
+    """
+    expected = list(range(start, start + len(chunk_images)))
+    identity = {
+        "cache_version": CACHE_VERSION,
+        "provider": provider,
+        "model": model,
+        "temperature": TEMPERATURE,
+        "prompt": prepared.prompt,
+        "metadata": prepared.metadata,
+        "images": source_image_state(chunk_images),
+        "object_id": prepared.doc_id,
+        "chunk": index,
+        "start": start,
+    }
+    path = (
+        _processed_path(CHUNK_CACHE_DIR, prepared.doc_id)
+        / f"{contract.canonical_hash(identity, length=None)}.json"
+    )
+    if path.exists() and not force:
+        try:
+            cached = read_json(path)
+        except (OSError, ValueError) as exc:
+            raise ItemFailure(
+                "cache", f"{exc}; retain the chunk cache and rerun with --force"
+            ) from exc
+        content = cached.get("content") if isinstance(cached, dict) else None
+        if (
+            not isinstance(content, dict)
+            or cached.get("identity") != identity
+            or cached.get("sha256") != contract.canonical_hash(content, length=None)
+            or not isinstance(content.get("calls"), list)
+            or _chunk_violations(content.get("result"), expected)
+        ):
+            raise ItemFailure(
+                "cache", f"Invalid chunk cache {path}; retain it and rerun with --force"
+            )
+        return content["result"], content["calls"]
+
+    result, calls = transcribe_chunk(
+        chunk_images,
+        prepared.prompt,
+        provider,
+        model,
+        prepared.doc_id,
+        index,
+        start,
+        provider_calls=provider_calls,
+    )
+    if result is None:
+        raise ItemFailure(
+            "parse", f"JSON parse failed for chunk {index + 1} after retry"
+        )
+    problems = _chunk_violations(result, expected)
+    if problems:
+        raise ItemFailure(
+            "contract",
+            f"Chunk {index + 1} violates the data contract: " + "; ".join(problems),
+        )
+    # Bytes that changed during the call must not be cached under the old
+    # identity; _build_output then rejects the whole document.
+    if source_image_state(chunk_images) == identity["images"]:
+        content = {"result": result, "calls": calls}
+        try:
+            write_json_atomic(
+                path,
+                {
+                    "_meta": provenance_meta(script="03_transcribe.py", step=3),
+                    "identity": identity,
+                    "content": content,
+                    "sha256": contract.canonical_hash(content, length=None),
+                },
+            )
+        except OSError as exc:
+            raise ItemFailure("cache", f"cannot write chunk cache: {exc}") from exc
+    return result, calls
 
 
 def merge_chunks(chunks: list[dict]) -> dict:
-    """Merge transcription results from multiple chunks into one document.
+    """Merge verified chunk answers into one document answer.
 
-    Page arrays concatenate. Object-level fields describe the document rather
-    than the chunk: metadata comes from the first chunk that carries it, the
-    confidence notes of all chunks are kept, and confidence stays in the
-    string vocabulary of the data contract instead of becoming a number.
+    Page arrays concatenate, the notes of all chunks are kept and confidence
+    becomes the weakest declared value in lower case. Model-proposed metadata
+    is not taken over.
     """
-    chunks = [chunk for chunk in chunks if isinstance(chunk, dict)]
-
-    merged_pages: list[dict] = []
-    metadata: dict = {}
+    pages: list[dict] = []
     notes: list[str] = []
-
+    declared: list[str] = []
     for chunk in chunks:
-        pages = chunk.get("pages", [])
-        if isinstance(pages, list):
-            merged_pages.extend(pages)
-        if not metadata and isinstance(chunk.get("metadata"), dict):
-            metadata = chunk["metadata"]
-        note = chunk.get("confidence_notes", "")
+        pages.extend(chunk["pages"])
+        confidence = chunk.get("confidence")
+        if isinstance(confidence, str) and confidence.strip():
+            declared.append(confidence.strip().lower())
+        note = chunk.get("confidence_notes")
         if isinstance(note, str) and note.strip():
             notes.append(note.strip())
-
     return {
-        "metadata": metadata,
-        "pages": merged_pages,
-        "confidence": _worst_confidence(chunks),
+        "pages": pages,
+        "confidence": min(declared, key=CONFIDENCE_ORDER.index) if declared else "",
         "confidence_notes": "\n".join(notes),
     }
 
 
-# ---------------------------------------------------------------------------
-# Per-document processing
-# ---------------------------------------------------------------------------
+def _transcribe_chunks(
+    prepared: PreparedDocument,
+    provider: str,
+    model: str,
+    chunk_size: int,
+    force: bool,
+    provider_calls: list[dict] | None,
+) -> tuple[dict, list[dict]]:
+    """Run every chunk of the document and merge the verified answers."""
+    results: list[dict] = []
+    executed: list[dict] = []
+    for index, offset in enumerate(range(0, len(prepared.images), chunk_size)):
+        result, calls = _cached_chunk(
+            prepared,
+            prepared.images[offset : offset + chunk_size],
+            index,
+            offset + 1,
+            provider,
+            model,
+            force,
+            provider_calls,
+        )
+        results.append(result)
+        executed.extend(calls)
+    return merge_chunks(results), executed
+
+
+def _build_output(
+    prepared: PreparedDocument,
+    merged: dict,
+    executed: list[dict],
+    provider: str,
+    model: str,
+) -> dict:
+    """Assemble the contract file and check it once as a whole."""
+    try:
+        final_state = source_image_state(prepared.images)
+    except OSError as exc:
+        raise ItemFailure("source_state", str(exc)) from exc
+    if final_state != prepared.image_state:
+        raise ItemFailure("source_state", "Source images changed during transcription")
+
+    pages = initialize_machine_pages(merged["pages"])
+    meta = provenance_meta(
+        script="03_transcribe.py",
+        provider=provider,
+        model=model,
+        prompt_template="transcription.md",
+        step=3,
+    )
+    meta.update(prepared.prompt_info)
+    meta["executed_prompts"] = executed
+    meta["source_images"] = prepared.image_state
+    meta["source_images_hash"] = source_image_state_hash(prepared.image_state)
+    meta["source_metadata_hash"] = contract.canonical_hash(prepared.metadata)
+    meta["raw_transcription_hash"] = contract.raw_transcription_state_hash(
+        {"pages": pages}
+    )
+    output = {
+        "_meta": meta,
+        "object_id": prepared.doc_id,
+        "source_images": [image.name for image in prepared.images],
+        "metadata": prepared.metadata,
+        "pages": pages,
+        "confidence": merged["confidence"],
+        "confidence_notes": merged["confidence_notes"],
+        "quality_signals": compute_quality_signals(
+            {"pages": pages}, len(prepared.images)
+        ),
+    }
+    problems = contract.file_violations(output)
+    if problems:
+        raise ItemFailure(
+            "contract",
+            "Assembled transcription violates the data contract: "
+            + "; ".join(problems),
+        )
+    return output
 
 
 def transcribe_document(
@@ -321,391 +599,147 @@ def transcribe_document(
     model: str,
     chunk_size: int,
     force: bool,
+    provider_calls: list[dict] | None = None,
 ) -> dict | None:
-    """Transcribe a single document. Returns error dict on failure, None on success."""
-    doc_id = doc.get("id")
-    if not contract.valid_object_id(doc_id):
-        return {
-            "object_id": str(doc_id),
-            "error": "inventory object_id is not a path-safe identifier",
-            "stage": "contract",
-        }
-    out_path = TRANSCRIPTIONS_DIR / f"{doc_id}.json"
+    """Transcribe one document; return its error record, or None on success.
 
-    source_metadata = doc.get("metadata", {})
-    metadata_problems = contract.metadata_violations(
-        source_metadata,
-        prefix="inventory metadata",
-    )
-    if metadata_problems:
-        return {
-            "object_id": doc_id,
-            "error": "Input violates the data contract: "
-            + "; ".join(metadata_problems),
-            "stage": "contract",
-        }
-
+    provider_calls, when given, collects every provider call actually
+    started, so the caller can pace only after real calls.
+    """
     try:
-        images = find_images_for_document(doc)
-    except (OSError, ValueError) as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "discovery"}
-    if not images:
-        return {"object_id": doc_id, "error": "No images found", "stage": "discovery"}
-
-    try:
-        image_state = source_image_state(images)
-    except OSError as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "discovery"}
-
-    try:
-        system_prompt, prompt_info = assemble_prompt(doc, base_prompt)
-    except (FileNotFoundError, ValueError) as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "prompt"}
-
-    if out_path.exists():
+        prepared = _prepare(doc, base_prompt)
+        out_path = TRANSCRIPTIONS_DIR / f"{prepared.doc_id}.json"
+        if _existing_output_is_current(out_path, prepared, provider, model, force):
+            print(
+                f"  SKIP {prepared.doc_id} (transcription matches prompt and source state)"
+            )
+            return None
+        print(f"  Processing {prepared.doc_id} ({len(prepared.images)} page(s)) ...")
+        merged, executed = _transcribe_chunks(
+            prepared, provider, model, chunk_size, force, provider_calls
+        )
+        output = _build_output(prepared, merged, executed, provider, model)
         try:
-            existing = json.loads(out_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            return {
-                "object_id": doc_id,
-                "error": (
-                    f"Existing transcription is unreadable: {exc}; retain and "
-                    "repair or rename it before starting a new model run"
-                ),
-                "stage": "stale",
-            }
-        if force:
-            existing_problems = contract.file_violations(existing)
-            if existing_problems:
-                return {
-                    "object_id": doc_id,
-                    "error": (
-                        "Refusing --force because the existing transcription is "
-                        "not contract-conformant; retain and repair or rename it"
-                    ),
-                    "stage": "stale",
-                }
-            if _has_review_history(existing):
-                return {
-                    "object_id": doc_id,
-                    "error": (
-                        "Refusing --force because the existing transcription contains "
-                        "human review history; retain it and use a new object identifier "
-                        "for a new model run"
-                    ),
-                    "stage": "review_history",
-                }
-            existing = None
-        else:
-            assert isinstance(existing, dict)
-            existing_meta = existing.get("_meta", {})
-            current_source_hash = source_image_state_hash(image_state)
-            current = (
-                not contract.file_violations(existing)
-                and existing.get("object_id") == doc_id
-                and existing_meta.get("pipeline_step") == 3
-                and existing_meta.get("provider") == provider
-                and existing_meta.get("model") == model
-                and existing_meta.get("prompt_hash") == prompt_info["prompt_hash"]
-                and existing_meta.get("prompt_layers") == prompt_info["prompt_layers"]
-                and existing_meta.get("prompt_profile")
-                == prompt_info.get("prompt_profile")
-                and existing_meta.get("source_images_hash") == current_source_hash
-                and existing_meta.get("source_metadata_hash")
-                == _metadata_hash(source_metadata)
-            )
-            if current:
-                print(
-                    f"  SKIP {doc_id} (transcription matches prompt and source state)"
-                )
-                return None
-            return {
-                "object_id": doc_id,
-                "error": "Existing transcription is stale or invalid; rerun with --force",
-                "stage": "stale",
-            }
-
-    print(f"  Processing {doc_id} ({len(images)} page(s)) ...", end="", flush=True)
-
-    def run_chunk(chunk_images: list[Path], index: int, start: int):
-        identity = {
-            "cache_version": 1,
-            "provider": provider,
-            "model": model,
-            "temperature": TEMPERATURE,
-            "prompt": system_prompt,
-            "metadata": source_metadata,
-            "images": source_image_state(chunk_images),
-            "object_id": doc_id,
-            "chunk": index,
-            "start": start,
+            write_json_atomic(out_path, output)
+        except OSError as exc:
+            raise ItemFailure("write", str(exc)) from exc
+    except ItemFailure as failure:
+        return {
+            "object_id": str(doc.get("id")),
+            "error": failure.message,
+            "stage": failure.stage,
         }
-        path = (
-            TRANSCRIPTIONS_DIR.parent
-            / "chunk-cache"
-            / doc_id
-            / f"{canonical_sha256(identity)}.json"
-        )
-        expected = list(range(start, start + len(chunk_images)))
-        if path.exists() and not force:
-            cached = json.loads(path.read_bytes())
-            content = cached.get("content", {})
-            if (
-                cached.get("identity") != identity
-                or cached.get("sha256") != canonical_sha256(content)
-                or contract.response_violations(
-                    content.get("result"), expected_numbers=expected
-                )
-            ):
-                raise ValueError(
-                    "Invalid chunk cache; retain it and rerun with --force"
-                )
-            return content["result"], content["calls"]
-        result, calls = transcribe_chunk(
-            chunk_images, system_prompt, provider, model, doc_id, index, start
-        )
-        if source_image_state(chunk_images) != identity["images"]:
-            return result, calls
-        if not contract.response_violations(result, expected_numbers=expected):
-            content = {"result": result, "calls": calls}
-            write_json_atomic(
-                path,
-                {
-                    "_meta": provenance_meta(script="03_transcribe.py", step=3),
-                    "identity": identity,
-                    "content": content,
-                    "sha256": canonical_sha256(content),
-                },
-            )
-        return result, calls
-
-    try:
-        executed_prompts: list[dict] = []
-        # Split into chunks if needed
-        if len(images) <= chunk_size:
-            result, calls = run_chunk(images, 0, 1)
-            executed_prompts.extend(calls)
-            if result is None:
-                return {
-                    "object_id": doc_id,
-                    "error": "JSON parse failed after retry",
-                    "stage": "parse",
-                }
-            violations = contract.response_violations(
-                result,
-                expected_pages=len(images),
-                expected_numbers=list(range(1, len(images) + 1)),
-            )
-            if violations:
-                return {
-                    "object_id": doc_id,
-                    "error": "Model response violates the data contract: "
-                    + "; ".join(violations),
-                    "stage": "contract",
-                }
-        else:
-            chunk_results: list[dict] = []
-            for i in range(0, len(images), chunk_size):
-                chunk_imgs = images[i : i + chunk_size]
-                chunk_result, calls = run_chunk(chunk_imgs, i // chunk_size, i + 1)
-                executed_prompts.extend(calls)
-                if chunk_result is None:
-                    return {
-                        "object_id": doc_id,
-                        "error": f"JSON parse failed for chunk {i // chunk_size}",
-                        "stage": "parse",
-                    }
-                expected_numbers = list(range(i + 1, i + len(chunk_imgs) + 1))
-                violations = contract.response_violations(
-                    chunk_result,
-                    expected_pages=len(chunk_imgs),
-                    expected_numbers=expected_numbers,
-                )
-                if violations:
-                    return {
-                        "object_id": doc_id,
-                        "error": f"Chunk {i // chunk_size + 1} violates the data contract: "
-                        + "; ".join(violations),
-                        "stage": "contract",
-                    }
-                chunk_results.append(chunk_result)
-            result = merge_chunks(chunk_results)
-
-    except (FileNotFoundError, ValueError) as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "prompt"}
     except Exception as exc:
+        # A programming error must not pass for a provider failure; the type
+        # name and the stage tell the two apart in errors.json.
         return {
-            "object_id": doc_id,
-            "error": redact_secrets(str(exc)),
-            "stage": "api_call",
+            "object_id": str(doc.get("id")),
+            "error": redact_secrets(f"{type(exc).__name__}: {exc}"),
+            "stage": "internal",
         }
 
-    # Contract gate before writing: an answer without a usable pages structure
-    # would otherwise produce a file that claims an empty but reviewed
-    # transcription (needs_review false), which no later step can distinguish
-    # from a genuinely blank document.
-    violations = contract.response_violations(
-        result,
-        expected_pages=len(images),
-        expected_numbers=list(range(1, len(images) + 1)),
-    )
-    if violations:
-        return {
-            "object_id": doc_id,
-            "error": "Model response violates the data contract: "
-            + "; ".join(violations),
-            "stage": "contract",
-        }
-
-    pages = initialize_machine_pages(result.get("pages", []))
-    quality = compute_quality_signals({"pages": pages}, len(images))
-
-    model_metadata = result.get("metadata", {})
-    if not isinstance(model_metadata, dict):
-        model_metadata = {}
-    metadata = {**model_metadata, **source_metadata}
-
-    meta = provenance_meta(
-        script="03_transcribe.py",
-        provider=provider,
-        model=model,
-        prompt_template="transcription.md",
-        step=3,
-    )
-    meta.update(prompt_info)
-    meta["executed_prompts"] = executed_prompts
-    try:
-        final_image_state = source_image_state(images)
-    except OSError as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "source_state"}
-    if image_state != final_image_state:
-        return {
-            "object_id": doc_id,
-            "error": "Source images changed during transcription",
-            "stage": "source_state",
-        }
-    meta["source_images"] = image_state
-    meta["source_images_hash"] = source_image_state_hash(image_state)
-    meta["source_metadata_hash"] = _metadata_hash(source_metadata)
-    meta["raw_transcription_hash"] = contract.raw_transcription_state_hash(
-        {"pages": pages}
-    )
-
-    # Output follows the pipeline data contract (knowledge/08_DATA_CONTRACT.md):
-    # pages at the top level, object metadata under "metadata". Steps 4-6 pass
-    # both through unchanged. Manifest metadata is authoritative over any
-    # metadata proposed by the model.
-    output = {
-        "_meta": meta,
-        "object_id": doc_id,
-        "source_images": [img.name for img in images],
-        "metadata": metadata,
-        "pages": pages,
-        "confidence": result.get("confidence", ""),
-        "confidence_notes": result.get("confidence_notes", ""),
-        "quality_signals": quality,
-    }
-
-    violations = contract.file_violations(output)
-    if violations:
-        return {
-            "object_id": doc_id,
-            "error": "Assembled transcription violates the data contract: "
-            + "; ".join(violations),
-            "stage": "contract",
-        }
-
-    try:
-        write_json_atomic(out_path, output)
-    except OSError as exc:
-        return {"object_id": doc_id, "error": str(exc), "stage": "write"}
-
+    quality = output["quality_signals"]
     status = "REVIEW" if quality["needs_review"] else "OK"
     print(
-        f" {status} ({quality['total_chars']} chars, {quality['content_pages']}/{len(images)} content pages)"
+        f"  {status} {prepared.doc_id} ({quality['total_chars']} chars, "
+        f"{quality['content_pages']}/{len(prepared.images)} content pages)"
     )
     return None
 
 
-# ---------------------------------------------------------------------------
-# CLI and batch orchestration
-# ---------------------------------------------------------------------------
-
-
-def load_inventory() -> dict:
-    if not INVENTORY_PATH.exists():
+def load_inventory() -> list[dict]:
+    """Return the inventory's document records or exit 1 pointing to step 2."""
+    try:
+        inventory = read_json(INVENTORY_PATH)
+    except FileNotFoundError:
         print(
             f"ERROR: {INVENTORY_PATH} not found. Run 02_analyze.py first.",
             file=sys.stderr,
         )
         sys.exit(1)
-    try:
-        inventory = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: cannot read {INVENTORY_PATH}: {exc}", file=sys.stderr)
         sys.exit(1)
     documents = inventory.get("documents") if isinstance(inventory, dict) else None
-    if not isinstance(documents, list) or any(
-        not isinstance(doc, dict)
-        or not isinstance(doc.get("id"), str)
-        or not contract.valid_object_id(doc["id"])
-        for doc in documents
+    if not isinstance(documents, list) or not all(
+        isinstance(doc, dict) for doc in documents
     ):
         print(
-            "ERROR: inventory must contain documents with path-safe string IDs.",
+            f"ERROR: {INVENTORY_PATH} carries no list of document objects; "
+            "rerun 02_analyze.py.",
             file=sys.stderr,
         )
         sys.exit(1)
-    id_problems = contract.unique_object_id_violations([doc["id"] for doc in documents])
-    if id_problems:
-        print("ERROR: " + "; ".join(id_problems), file=sys.stderr)
-        sys.exit(1)
-    return inventory
+    return documents
 
 
 def select_documents(
-    inventory: dict, object_id: str | None, all_flag: bool, sample: int | None
+    documents: list[dict], object_id: str | None, all_flag: bool, sample: int | None
 ) -> list[dict]:
-    docs = inventory.get("documents", [])
+    """Select inventory records; exit 1 on an invalid or empty selection.
 
-    if object_id:
-        matches = [d for d in docs if d["id"] == object_id]
-        if not matches:
-            print(
-                f"ERROR: Object '{object_id}' not found in inventory.", file=sys.stderr
-            )
-            sys.exit(1)
-        return matches
-
+    Records that step 2 marks transcribable: false (text, XML, DOCX or
+    transcription sources without page images) are left out and named, so
+    --sample counts only documents this step can read.
+    """
+    excluded = [doc for doc in documents if doc.get("transcribable") is False]
+    if object_id is not None and any(doc.get("id") == object_id for doc in excluded):
+        print(
+            f"ERROR: {object_id} has no page images for step 3 "
+            "(inventory marks it transcribable: false).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    candidates = [doc for doc in documents if doc.get("transcribable") is not False]
+    ids = select_ids([doc.get("id") for doc in candidates], object_id, all_flag, sample)
     if all_flag:
-        if sample and sample > 0:
-            return docs[:sample]
-        return docs
+        for doc in excluded:
+            print(
+                f"  SKIP {doc.get('id')} (source_type {doc.get('source_type')!r} "
+                "has no page images for step 3)"
+            )
+    by_id = {doc["id"]: doc for doc in candidates}
+    return [by_id[doc_id] for doc_id in ids]
 
-    print("Specify --object ID, --all, or --all --sample N", file=sys.stderr)
-    sys.exit(1)
+
+def dry_run(
+    docs: list[dict], base_prompt: str, provider: str, model: str, force: bool
+) -> None:
+    """List what a run would do without provider calls; exit 1 if any would fail."""
+    print("DRY RUN, no provider calls:\n")
+    blocked = 0
+    for doc in docs:
+        try:
+            prepared = _prepare(doc, base_prompt)
+            out_path = TRANSCRIPTIONS_DIR / f"{prepared.doc_id}.json"
+            current = _existing_output_is_current(
+                out_path, prepared, provider, model, force
+            )
+        except ItemFailure as failure:
+            blocked += 1
+            print(f"  [{failure.stage.upper()}] {doc.get('id')}: {failure.message}")
+            continue
+        status = "CURRENT" if current else "PENDING"
+        print(f"  [{status}] {prepared.doc_id}: {len(prepared.images)} image(s)")
+    if blocked:
+        print(
+            f"\n{blocked} of {len(docs)} document(s) would fail with these options.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
-def main():
+def main() -> None:
+    configure_console()
     parser = argparse.ArgumentParser(description="Transcribe document images via LLM.")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--object", metavar="ID", help="Transcribe a single document by ID"
-    )
-    group.add_argument(
-        "--all", action="store_true", help="Transcribe all documents in inventory"
-    )
-    parser.add_argument(
-        "--sample",
-        type=int,
-        metavar="N",
-        help="Process only first N documents (with --all)",
-    )
+    add_selection_args(parser)
     parser.add_argument(
         "--force", action="store_true", help="Overwrite existing transcriptions"
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="List documents without calling API"
+        "--dry-run",
+        action="store_true",
+        help="Check inputs and existing outputs without calling the provider",
     )
     parser.add_argument(
         "--chunk-size",
@@ -717,70 +751,53 @@ def main():
         "--delay",
         type=float,
         default=BATCH_DELAY,
-        help=f"Seconds between documents (default {BATCH_DELAY})",
+        help=f"Seconds after a document that called the provider (default {BATCH_DELAY})",
     )
     args = parser.parse_args()
+    if args.chunk_size < 1:
+        parser.error("--chunk-size must be at least 1")
+    if args.delay < 0:
+        parser.error("--delay must not be negative")
 
     ensure_dirs()
-    inventory = load_inventory()
-    docs = select_documents(inventory, args.object, args.all, args.sample)
+    docs = select_documents(load_inventory(), args.object, args.all, args.sample)
     provider = TRANSCRIPTION_PROVIDER
     model = TRANSCRIPTION_MODEL
-
-    # Fail fast instead of producing empty or partial results without a key.
-    if not args.dry_run:
-        config_error = provider_config_error(provider, model)
-        if config_error:
-            print(f"ERROR: {config_error}.", file=sys.stderr)
-            sys.exit(1)
-        missing = missing_api_key(provider)
-        if missing:
-            print(
-                f"ERROR: no API key configured, this step requires one. "
-                f"Set {missing} in .env for provider '{provider}'.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    base_prompt = load_prompt("transcription.md")
 
     print(f"Transcription: {len(docs)} document(s), provider={provider}, model={model}")
     print(f"Chunk size={args.chunk_size}, delay={args.delay}s\n")
-
     if args.dry_run:
-        print("DRY RUN -- no API calls will be made:\n")
-        for doc in docs:
-            images = find_images_for_document(doc)
-            out_path = TRANSCRIPTIONS_DIR / f"{doc['id']}.json"
-            status = "EXISTS" if out_path.exists() and not args.force else "PENDING"
-            print(f"  [{status}] {doc['id']}: {len(images)} image(s)")
+        dry_run(docs, base_prompt, provider, model, args.force)
         return
-
-    system_prompt = load_prompt("transcription.md")
+    require_provider(provider, model)
 
     errors: list[dict] = []
-    for i, doc in enumerate(docs):
-        err = transcribe_document(
-            doc, system_prompt, provider, model, args.chunk_size, args.force
+    for index, doc in enumerate(docs):
+        provider_calls: list[dict] = []
+        error = transcribe_document(
+            doc,
+            base_prompt,
+            provider,
+            model,
+            args.chunk_size,
+            args.force,
+            provider_calls=provider_calls,
         )
-        if err:
-            errors.append(err)
-            print(f"  FAIL {err['object_id']}: {err['error']}")
-
-        # Rate-limit courtesy delay between documents (not after the last one)
-        if i < len(docs) - 1:
+        if error:
+            errors.append(error)
+        # Rate-limit courtesy, owed only after a real provider call and not
+        # after the last document.
+        if provider_calls and index < len(docs) - 1:
             time.sleep(args.delay)
 
-    write_errors(errors, TRANSCRIPTIONS_DIR, "03_transcribe.py")
-    if errors:
-        print(
-            f"\n{len(errors)} error(s) written to {TRANSCRIPTIONS_DIR / 'errors.json'}"
-        )
-
-    succeeded = len(docs) - len(errors)
-    print(f"\nDone. {succeeded}/{len(docs)} document(s) transcribed successfully.")
-
-    # A document that could not be processed is a failed run, not a result.
-    if errors:
-        sys.exit(1)
+    finish_run(
+        errors,
+        TRANSCRIPTIONS_DIR,
+        len(docs),
+        "03_transcribe.py",
+        summary=f"Done. {len(docs) - len(errors)}/{len(docs)} document(s) transcribed or current.",
+    )
 
 
 if __name__ == "__main__":

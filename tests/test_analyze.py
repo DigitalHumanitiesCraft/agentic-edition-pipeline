@@ -169,3 +169,41 @@ def test_manifest_ids_must_be_casefold_unique(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="collide across filesystems"):
         step2.merge_source_manifest({})
+
+
+def test_inventory_marks_sources_without_page_images(monkeypatch, tmp_path):
+    sources = tmp_path / "sources"
+    (sources / "text").mkdir(parents=True)
+    (sources / "text" / "notes.txt").write_text("text", encoding="utf-8")
+    _make_pages(sources / "images" / "scan", ".png", 1)
+    monkeypatch.setattr(step2, "SOURCES_DIR", sources)
+
+    inventory = step2.build_inventory(step2.scan_sources())
+
+    flags = {doc["id"]: doc["transcribable"] for doc in inventory["documents"]}
+    assert flags == {"notes": False, "scan": True}
+    assert "| notes | text |" in step2.inventory_to_markdown(inventory)
+
+
+def test_extracted_manifest_hashes_are_verified(monkeypatch, tmp_path):
+    images = tmp_path / "images"
+    _make_pages(images / "doc1", ".png", 1)
+    (images / "doc1" / "manifest.json").write_text(
+        json.dumps(
+            {"pages": [{"page": 1, "filename": "doc1_p001.png", "sha256": "0" * 64}]}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(step2, "IMAGES_DIR", images)
+
+    with pytest.raises(ValueError, match="changed after creation"):
+        step2.scan_extracted_images({})
+
+
+def test_processed_image_ids_must_be_casefold_unique(monkeypatch, tmp_path):
+    images = tmp_path / "images"
+    _make_pages(images / "doc", ".png", 1)
+    monkeypatch.setattr(step2, "IMAGES_DIR", images)
+
+    with pytest.raises(ValueError, match="collide across filesystems"):
+        step2.scan_extracted_images({"Doc": {"id": "Doc", "pages": 1}})

@@ -1,17 +1,29 @@
 """Materialize remote facsimiles as local image files.
 
-Remote-facsimile corpora reference their images as URLs, either in the
-transcription JSON (metadata.image_urls, see knowledge/08_DATA_CONTRACT.md)
-or in generated TEI (<facsimile><graphic url="..."/>). This utility downloads
-those images to data/processed/images/{object_id}/ so that vision-based
-transcription and verification can read the files locally. Check the licence
-of the image provider before materializing.
+Flat script-pipeline regime, not a numbered step. Remote-facsimile corpora
+reference their images as URLs, and this utility downloads them to
+data/processed/images/{object_id}/ with a manifest.json that binds every URL
+to the saved filename and SHA-256, so that vision-based transcription and
+verification read verified local bytes. Check the licence of the image
+provider before materializing.
 
-Not a numbered pipeline step: run it whenever local copies are needed,
-typically before step 3 (agentic transcription needs the file on disk,
-a URL fetch alone does not reach the vision input) or before step 6.
+Three source modes select where the URLs come from:
+    --from-manifest        data/inventory.json (metadata.image_urls), the
+                           entry path before step 3
+    --from-transcriptions  data/processed/transcriptions/*.json
+                           (metadata.image_urls)
+    (default)              results/tei/*.xml (<facsimile><graphic url>),
+                           for imported or generated TEI before step 6
 
-Idempotent: existing files are skipped unless --force.
+Downloads are paced by FETCH_DELAY_SECONDS, transient failures (429, 5xx,
+connection errors) are retried with bounded backoff, and a response larger
+than FETCH_MAX_BYTES is refused while it streams. Downloaded bytes must
+decode as JPEG, PNG or TIFF. Idempotent: a page whose file, URL and hash
+still match the previous manifest is skipped unless --force.
+
+Usage:
+    uv run python pipeline/fetch_facsimiles.py --all --from-manifest
+    uv run python pipeline/fetch_facsimiles.py --object ID [--force]
 """
 
 from __future__ import annotations
@@ -19,24 +31,32 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
-import json
 import os
 import sys
 import time
 from pathlib import Path
 
 import requests
+from lxml import etree
 from PIL import Image, UnidentifiedImageError
 
 import contract
 from config import (
-    DATA_DIR,
+    IMAGE_SUFFIXES,
     IMAGES_DIR,
+    INVENTORY_PATH,
+    NS,
     RESULTS_TEI_DIR,
     TRANSCRIPTIONS_DIR,
+    XML_NS,
+    add_selection_args,
+    configure_console,
+    finish_run,
     provenance_meta,
+    read_json,
+    safe_xml_parser,
+    select_ids,
     write_bytes_atomic,
-    write_errors,
     write_json_atomic,
 )
 
@@ -44,54 +64,66 @@ FETCH_TIMEOUT = 60
 FETCH_DELAY_SECONDS = float(os.environ.get("FETCH_DELAY_SECONDS", "0.5"))
 FETCH_MAX_RETRIES = int(os.environ.get("FETCH_MAX_RETRIES", "3"))
 FETCH_BACKOFF_SECONDS = float(os.environ.get("FETCH_BACKOFF_SECONDS", "1.0"))
-INVENTORY_PATH = DATA_DIR / "inventory.json"
+# Upper bound for one downloaded facsimile, held in memory before it is
+# verified. An uncompressed 600-dpi A3 RGB TIFF (7020 x 9900 pixels) is about
+# 208 MB and fits; an endless or hostile response is cut off.
+FETCH_MAX_BYTES = int(os.environ.get("FETCH_MAX_BYTES", str(256 * 1024 * 1024)))
 FETCH_USER_AGENT = (
-    "agentic-edition-pipeline/0.9 "
+    "agentic-edition-pipeline "
     "(+https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/issues)"
 )
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff"})
 IMAGE_FORMAT_SUFFIX = {"JPEG": ".jpg", "PNG": ".png", "TIFF": ".tif"}
+CONTENT_TYPE_SUFFIX = {"image/jpeg": ".jpg", "image/png": ".png", "image/tiff": ".tif"}
 
 
-def _extension_from_response(url: str, content_type: str) -> str:
-    mapping = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/tiff": ".tif",
-    }
-    if content_type in mapping:
-        return mapping[content_type]
-    suffix = Path(url.split("?")[0]).suffix.lower()
-    if suffix in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
-        return suffix
-    return ".jpg"
+def _error(object_id: str, stage: str, message: str, **context: object) -> dict:
+    """Build one error record; context adds fields such as page and url."""
+    return {"object_id": object_id, **context, "error": message, "stage": stage}
 
 
 def _validated_image_suffix(content: bytes) -> str:
-    """Verify downloaded bytes and return their canonical image suffix."""
+    """Verify image bytes and return their canonical suffix.
+
+    PIL's DecompressionBombError is no OSError, so it is caught by name; a
+    pixel bomb would otherwise abort the run before errors.json is written.
+    """
     try:
         with Image.open(io.BytesIO(content)) as image:
             image.verify()
             image_format = image.format
-    except (UnidentifiedImageError, OSError) as exc:
-        raise ValueError("response is not a valid supported image") from exc
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ValueError(f"response is not a valid supported image: {exc}") from exc
     if image_format not in IMAGE_FORMAT_SUFFIX:
         raise ValueError(f"unsupported image format: {image_format}")
     return IMAGE_FORMAT_SUFFIX[image_format]
 
 
-def _is_valid_image(path: Path) -> bool:
-    """Return whether an existing local file is a supported, readable image."""
+def _existing_digest(path: Path) -> str:
+    """Return the SHA-256 of a valid local image, or "" when it is unusable.
+
+    The file is read once for both the validity check and the digest.
+    """
     try:
-        _validated_image_suffix(path.read_bytes())
+        content = path.read_bytes()
+        _validated_image_suffix(content)
     except (OSError, ValueError):
-        return False
-    return True
+        return ""
+    return hashlib.sha256(content).hexdigest()
 
 
-def _image_digest(path: Path) -> str:
-    """Hash the exact local facsimile bytes used downstream."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _read_limited(response: requests.Response) -> bytes:
+    """Read a streamed response body, refusing more than FETCH_MAX_BYTES."""
+    declared = response.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > FETCH_MAX_BYTES:
+        raise ValueError(
+            f"response declares {declared} bytes; limit is {FETCH_MAX_BYTES}"
+        )
+    content = bytearray()
+    for block in response.iter_content(chunk_size=1024 * 1024):
+        content.extend(block)
+        if len(content) > FETCH_MAX_BYTES:
+            raise ValueError(f"response exceeds the limit of {FETCH_MAX_BYTES} bytes")
+    return bytes(content)
 
 
 def _request_with_retry(
@@ -99,27 +131,40 @@ def _request_with_retry(
     url: str,
     previous_request_at: float,
 ) -> tuple[requests.Response, float]:
-    """Fetch one URL with host-friendly pacing and bounded transient retries."""
+    """Fetch one URL with host-friendly pacing and bounded transient retries.
+
+    Only 429, 5xx and connection-level errors are retried; any other HTTP
+    error raises at once. The response is streamed, and the caller reads it
+    with _read_limited and closes it.
+    """
+    attempt = 0
     request_at = previous_request_at
-    for attempt in range(FETCH_MAX_RETRIES + 1):
+    while True:
         remaining_delay = FETCH_DELAY_SECONDS - (time.monotonic() - request_at)
         if request_at and remaining_delay > 0:
             time.sleep(remaining_delay)
         request_at = time.monotonic()
+        final = attempt == FETCH_MAX_RETRIES
         response: requests.Response | None = None
         try:
-            response = session.get(url, timeout=FETCH_TIMEOUT)
-            status = getattr(response, "status_code", 200)
-            transient = status == 429 or 500 <= status < 600
-            if not transient or attempt == FETCH_MAX_RETRIES:
-                response.raise_for_status()
-                return response, request_at
+            response = session.get(url, timeout=FETCH_TIMEOUT, stream=True)
         except requests.RequestException:
-            if attempt == FETCH_MAX_RETRIES:
+            if final:
                 raise
+        else:
+            status = getattr(response, "status_code", 200)
+            if final or not (status == 429 or 500 <= status < 600):
+                try:
+                    response.raise_for_status()
+                except requests.RequestException:
+                    response.close()
+                    raise
+                return response, request_at
         retry_after = (
             response.headers.get("retry-after", "") if response is not None else ""
         )
+        if response is not None:
+            response.close()
         try:
             server_delay = float(retry_after)
         except (TypeError, ValueError):
@@ -127,55 +172,61 @@ def _request_with_retry(
         backoff = max(server_delay, FETCH_BACKOFF_SECONDS * (2**attempt))
         if backoff > 0:
             time.sleep(backoff)
-    raise RuntimeError("unreachable retry state")
+        attempt += 1
+
+
+def _pairs_from_image_urls(urls: object) -> list[tuple[int, str]]:
+    """Return sorted (page, url) pairs from a metadata.image_urls value."""
+    pairs: list[tuple[int, str]] = []
+    if isinstance(urls, dict):
+        for key, url in urls.items():
+            if str(key).isdigit() and str(url).startswith("http"):
+                pairs.append((int(key), str(url)))
+    elif isinstance(urls, list):
+        for index, url in enumerate(urls, start=1):
+            if str(url).startswith("http"):
+                pairs.append((index, str(url)))
+    return sorted(pairs)
 
 
 def urls_from_tei(tei_path: Path) -> list[tuple[int, str]]:
-    """Extract (page_number, url) pairs from a TEI <facsimile> block."""
-    from lxml import etree
+    """Extract (page_number, url) pairs from a TEI <facsimile> block.
 
-    ns = {"tei": "http://www.tei-c.org/ns/1.0"}
-    xml_id = "{http://www.w3.org/XML/1998/namespace}id"
-    root = etree.parse(str(tei_path)).getroot()
-
-    # Page numbers come from pb/@facs pointers (#facs_N); graphics without a
-    # matching pb keep their position index.
+    Page numbers come from pb/@facs pointers (#id) with a numeric @n;
+    graphics without a matching pb keep their position.
+    """
+    root = etree.parse(str(tei_path), safe_xml_parser()).getroot()
     id_to_page: dict[str, int] = {}
-    for pb in root.findall(".//tei:body//tei:pb", ns):
+    for pb in root.findall(".//tei:body//tei:pb", NS):
         facs = pb.get("facs", "")
         n = pb.get("n", "")
         if facs.startswith("#") and n.isdigit():
             id_to_page[facs[1:]] = int(n)
 
     pairs: list[tuple[int, str]] = []
-    for i, graphic in enumerate(root.findall(".//tei:facsimile/tei:graphic", ns)):
+    for index, graphic in enumerate(
+        root.findall(".//tei:facsimile/tei:graphic", NS), start=1
+    ):
         url = graphic.get("url", "")
-        gid = graphic.get(xml_id, "")
         if url.startswith("http"):
-            pairs.append((id_to_page.get(gid, i + 1), url))
+            graphic_id = graphic.get(f"{{{XML_NS}}}id", "")
+            pairs.append((id_to_page.get(graphic_id, index), url))
     return pairs
 
 
 def urls_from_transcription(json_path: Path) -> list[tuple[int, str]]:
     """Extract (page_number, url) pairs from metadata.image_urls."""
-    data = json.loads(json_path.read_text(encoding="utf-8"))
-    urls = data.get("metadata", {}).get("image_urls")
-    pairs: list[tuple[int, str]] = []
-    if isinstance(urls, dict):
-        for key, url in urls.items():
-            if str(key).isdigit() and str(url).startswith("http"):
-                pairs.append((int(key), url))
-    elif isinstance(urls, list):
-        for i, url in enumerate(urls):
-            if str(url).startswith("http"):
-                pairs.append((i + 1, url))
-    return sorted(pairs)
+    data = read_json(json_path)
+    metadata = data.get("metadata") if isinstance(data, dict) else None
+    if not isinstance(metadata, dict):
+        return []
+    return _pairs_from_image_urls(metadata.get("image_urls"))
 
 
 def objects_from_inventory(json_path: Path) -> list[tuple[str, list[tuple[int, str]]]]:
     """Read remote facsimile declarations from the generated inventory."""
-    data = json.loads(json_path.read_text(encoding="utf-8"))
-    documents = data.get("documents", [])
+    data = read_json(json_path)
+    documents = data.get("documents") if isinstance(data, dict) else None
     if not isinstance(documents, list):
         raise ValueError("inventory carries no documents list")
 
@@ -186,18 +237,9 @@ def objects_from_inventory(json_path: Path) -> list[tuple[str, list[tuple[int, s
         metadata = doc.get("metadata", {})
         if not isinstance(metadata, dict):
             continue
-        urls = metadata.get("image_urls")
-        pairs: list[tuple[int, str]] = []
-        if isinstance(urls, dict):
-            for key, url in urls.items():
-                if str(key).isdigit() and str(url).startswith("http"):
-                    pairs.append((int(key), str(url)))
-        elif isinstance(urls, list):
-            for index, url in enumerate(urls, start=1):
-                if str(url).startswith("http"):
-                    pairs.append((index, str(url)))
+        pairs = _pairs_from_image_urls(metadata.get("image_urls"))
         if pairs:
-            objects.append((doc["id"], sorted(pairs)))
+            objects.append((doc["id"], pairs))
     return objects
 
 
@@ -207,48 +249,45 @@ def fetch_object(
     """Download all facsimiles for one object. Returns a list of error dicts."""
     if not contract.valid_object_id(object_id):
         return [
-            {
-                "object_id": str(object_id),
-                "error": "facsimile object_id is not a path-safe identifier",
-                "stage": "contract",
-            }
+            _error(
+                str(object_id),
+                "contract",
+                "facsimile object_id is not a path-safe identifier",
+            )
         ]
     image_root = IMAGES_DIR.resolve()
     out_dir = (IMAGES_DIR / object_id).resolve()
     if image_root not in out_dir.parents:
         return [
-            {
-                "object_id": object_id,
-                "error": "facsimile output escaped the configured image root",
-                "stage": "contract",
-            }
+            _error(
+                object_id,
+                "contract",
+                "facsimile output escaped the configured image root",
+            )
         ]
-    errors: list[dict] = []
-    manifest_pages: list[dict] = []
-    previous_pages: dict[int, dict] = {}
-    try:
-        previous_manifest = json.loads(
-            (out_dir / "manifest.json").read_text(encoding="utf-8")
-        )
-        if not isinstance(previous_manifest, dict):
-            raise TypeError("image manifest is not an object")
-        for previous_page in previous_manifest.get("pages", []):
-            if isinstance(previous_page, dict) and isinstance(
-                previous_page.get("page"), int
-            ):
-                previous_pages[previous_page["page"]] = previous_page
-    except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError):
-        previous_pages = {}
     page_numbers = [page for page, _url in pairs]
     if page_numbers != list(range(1, len(pairs) + 1)):
         return [
-            {
-                "object_id": object_id,
-                "error": f"facsimile pages are {page_numbers}; expected consecutive pages from 1",
-                "stage": "contract",
-            }
+            _error(
+                object_id,
+                "contract",
+                f"facsimile pages are {page_numbers}; expected consecutive pages from 1",
+            )
         ]
+    previous_pages: dict[int, dict] = {}
+    try:
+        previous_manifest = read_json(out_dir / "manifest.json")
+        if isinstance(previous_manifest, dict):
+            for previous_page in previous_manifest.get("pages", []):
+                if isinstance(previous_page, dict) and isinstance(
+                    previous_page.get("page"), int
+                ):
+                    previous_pages[previous_page["page"]] = previous_page
+    except (OSError, ValueError, TypeError):
+        previous_pages = {}
 
+    errors: list[dict] = []
+    manifest_pages: list[dict] = []
     with requests.Session() as session:
         session.headers.update({"User-Agent": FETCH_USER_AGENT})
         previous_request_at = 0.0
@@ -259,26 +298,14 @@ def fetch_object(
                 if path.suffix.lower() in IMAGE_SUFFIXES
             ]
             if len(existing) > 1 and not force:
-                errors.append(
-                    {
-                        "object_id": object_id,
-                        "page": page_num,
-                        "error": "multiple local facsimile files exist for one page",
-                        "stage": "contract",
-                    }
-                )
+                message = "multiple local facsimile files exist for one page"
+                errors.append(_error(object_id, "contract", message, page=page_num))
                 manifest_pages.append(
-                    {
-                        "page": page_num,
-                        "image_url": url,
-                        "error": "multiple local facsimile files exist for one page",
-                    }
+                    {"page": page_num, "image_url": url, "error": message}
                 )
                 continue
             existing_digest = (
-                _image_digest(existing[0])
-                if existing and not force and _is_valid_image(existing[0])
-                else ""
+                _existing_digest(existing[0]) if existing and not force else ""
             )
             previous = previous_pages.get(page_num, {})
             if (
@@ -298,20 +325,22 @@ def fetch_object(
                 )
                 continue
             try:
-                resp, previous_request_at = _request_with_retry(
-                    session,
-                    url,
-                    previous_request_at,
+                response, previous_request_at = _request_with_retry(
+                    session, url, previous_request_at
                 )
-                content_type = resp.headers.get("content-type", "").split(";")[0]
-                declared_ext = _extension_from_response(url, content_type)
-                ext = _validated_image_suffix(resp.content)
-                if content_type.startswith("image/") and declared_ext != ext:
+                try:
+                    content = _read_limited(response)
+                finally:
+                    response.close()
+                content_type = response.headers.get("content-type", "").split(";")[0]
+                ext = _validated_image_suffix(content)
+                declared_ext = CONTENT_TYPE_SUFFIX.get(content_type)
+                if declared_ext and declared_ext != ext:
                     raise ValueError(
                         f"response image format {ext} conflicts with content type {content_type}"
                     )
                 out_path = out_dir / f"{object_id}_p{page_num:03d}{ext}"
-                write_bytes_atomic(out_path, resp.content)
+                write_bytes_atomic(out_path, content)
                 for stale in existing:
                     if stale != out_path:
                         stale.unlink()
@@ -320,30 +349,17 @@ def fetch_object(
                         "page": page_num,
                         "filename": out_path.name,
                         "image_url": url,
-                        "sha256": hashlib.sha256(resp.content).hexdigest(),
+                        "sha256": hashlib.sha256(content).hexdigest(),
                     }
                 )
-                print(
-                    f"  OK   {out_path.name} ({len(resp.content) // 1024} KB from {url})"
-                )
+                print(f"  OK   {out_path.name} ({len(content) // 1024} KB from {url})")
             except (requests.RequestException, OSError, ValueError) as exc:
                 errors.append(
-                    {
-                        "object_id": object_id,
-                        "page": page_num,
-                        "url": url,
-                        "error": str(exc),
-                        "stage": "fetch",
-                    }
+                    _error(object_id, "fetch", str(exc), page=page_num, url=url)
                 )
                 manifest_pages.append(
-                    {
-                        "page": page_num,
-                        "image_url": url,
-                        "error": str(exc),
-                    }
+                    {"page": page_num, "image_url": url, "error": str(exc)}
                 )
-                print(f"  FAIL page {page_num}: {exc}")
     try:
         if not errors:
             current_names = {page["filename"] for page in manifest_pages}
@@ -362,25 +378,52 @@ def fetch_object(
             },
         )
     except OSError as exc:
-        errors.append(
-            {
-                "object_id": object_id,
-                "error": str(exc),
-                "stage": "write",
-            }
-        )
+        errors.append(_error(object_id, "write", str(exc)))
     return errors
 
 
-def main():
+def _read_sources(
+    from_manifest: bool, from_transcriptions: bool
+) -> tuple[list[tuple[str, list[tuple[int, str]]]], list[dict]]:
+    """Collect (object_id, pairs) per source record and per-file read errors."""
+    if from_manifest:
+        try:
+            return objects_from_inventory(INVENTORY_PATH), []
+        except FileNotFoundError:
+            print(
+                f"ERROR: no inventory at {INVENTORY_PATH}. Run 02_analyze.py first.",
+                file=sys.stderr,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: cannot read {INVENTORY_PATH}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if from_transcriptions:
+        source_dir, pattern, extractor = (
+            TRANSCRIPTIONS_DIR,
+            "*.json",
+            urls_from_transcription,
+        )
+    else:
+        source_dir, pattern, extractor = RESULTS_TEI_DIR, "*.xml", urls_from_tei
+    sources: list[tuple[str, list[tuple[int, str]]]] = []
+    errors: list[dict] = []
+    for path in sorted(source_dir.glob(pattern)):
+        if path.stem == "errors":
+            continue
+        try:
+            sources.append((path.stem, extractor(path)))
+        except (OSError, ValueError, etree.XMLSyntaxError) as exc:
+            errors.append(_error(path.stem, "read", str(exc)))
+    return sources, errors
+
+
+def main() -> None:
+    configure_console()
     parser = argparse.ArgumentParser(
         description="Download remote facsimiles to data/processed/images/."
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--object", metavar="ID", help="Fetch a single object by ID")
-    group.add_argument(
-        "--all", action="store_true", help="Fetch all objects with remote URLs"
-    )
+    add_selection_args(parser)
     source_group = parser.add_mutually_exclusive_group()
     source_group.add_argument(
         "--from-manifest",
@@ -397,80 +440,34 @@ def main():
     )
     args = parser.parse_args()
 
-    sources: list[tuple[str, list[tuple[int, str]]]] = []
-    source_errors: list[dict] = []
-    if args.from_manifest:
-        if not INVENTORY_PATH.exists():
-            print(
-                f"No inventory found at {INVENTORY_PATH}. Run 02_analyze.py first.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        try:
-            sources = objects_from_inventory(INVENTORY_PATH)
-        except (json.JSONDecodeError, OSError, ValueError) as exc:
-            print(f"Cannot read {INVENTORY_PATH}: {exc}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        if args.from_transcriptions:
-            source_dir, suffix, extractor = (
-                TRANSCRIPTIONS_DIR,
-                "*.json",
-                urls_from_transcription,
-            )
-        else:
-            source_dir, suffix, extractor = RESULTS_TEI_DIR, "*.xml", urls_from_tei
-        files = [
-            path for path in sorted(source_dir.glob(suffix)) if path.stem != "errors"
-        ]
-        for path in files:
-            try:
-                sources.append((path.stem, extractor(path)))
-            except (json.JSONDecodeError, OSError, ValueError) as exc:
-                source_errors.append(
-                    {
-                        "object_id": path.stem,
-                        "error": str(exc),
-                        "stage": "read",
-                    }
-                )
-
-    id_problems = contract.unique_object_id_violations(
-        [object_id for object_id, _pairs in sources]
+    sources, source_errors = _read_sources(args.from_manifest, args.from_transcriptions)
+    if not sources and source_errors:
+        finish_run(source_errors, IMAGES_DIR, len(source_errors), "fetch_facsimiles.py")
+    pairs_by_id = dict(sources)
+    selected = select_ids(
+        [object_id for object_id, _pairs in sources],
+        args.object,
+        args.all,
+        args.sample,
     )
-    if id_problems:
-        print("ERROR: " + "; ".join(id_problems), file=sys.stderr)
-        sys.exit(1)
 
-    if args.object:
-        sources = [source for source in sources if source[0] == args.object]
-    if not sources:
-        if source_errors:
-            write_errors(source_errors, IMAGES_DIR, "fetch_facsimiles.py")
-            print(
-                f"No usable source records; {len(source_errors)} read error(s) written to "
-                f"{IMAGES_DIR / 'errors.json'}.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        print("No source records with remote facsimiles found.", file=sys.stderr)
-        sys.exit(1)
-
-    all_errors: list[dict] = list(source_errors)
-    fetched_any = False
-    for object_id, pairs in sources:
+    errors: list[dict] = list(source_errors)
+    fetched = 0
+    for object_id in selected:
+        pairs = pairs_by_id[object_id]
         if not pairs:
             continue
-        fetched_any = True
+        fetched += 1
         print(f"{object_id}: {len(pairs)} facsimile URL(s)")
-        all_errors.extend(fetch_object(object_id, pairs, args.force))
+        errors.extend(fetch_object(object_id, pairs, args.force))
 
-    if not fetched_any:
-        print("No remote facsimile URLs found.")
-    write_errors(all_errors, IMAGES_DIR, "fetch_facsimiles.py")
-    if all_errors:
-        print(f"\n{len(all_errors)} error(s) written to {IMAGES_DIR / 'errors.json'}")
-        sys.exit(1)
+    finish_run(
+        errors,
+        IMAGES_DIR,
+        len(selected) + len(source_errors),
+        "fetch_facsimiles.py",
+        summary=f"Done. {fetched} object(s) with remote facsimile URLs processed.",
+    )
 
 
 if __name__ == "__main__":
