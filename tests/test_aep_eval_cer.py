@@ -5,17 +5,17 @@ transcription conventions and page scope, zbz extraction rules), the
 Levenshtein rate and the fidelity/scope decomposition.
 """
 
-import sys
+import json
+import re
 from pathlib import Path
 
 import pytest
 
+import markers
+from aep_eval import cer, profiles
+from aep_eval.manifest import FIXTURE_SCHEMA
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from aep_eval import cer, profiles  # noqa: E402
-
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
 HSA = profiles.get_profile("hsa-strict")
 ZBZ = profiles.get_profile("zbz-fidelity")
@@ -27,7 +27,7 @@ def test_unknown_profile_is_rejected():
 
 
 def test_hsa_strict_keeps_case_and_punctuation_but_collapses_whitespace():
-    assert profiles.normalise(HSA, "  A,\n\tb  c ") == "A, b c"
+    assert HSA.normalise("  A,\n\tb  c ") == "A, b c"
 
 
 @pytest.mark.parametrize(
@@ -42,7 +42,7 @@ def test_hsa_strict_keeps_case_and_punctuation_but_collapses_whitespace():
     ],
 )
 def test_zbz_fidelity_normalises_symmetrically(raw, expected):
-    assert profiles.normalise(ZBZ, raw) == expected
+    assert ZBZ.normalise(raw) == expected
 
 
 def test_edition_reader_drops_editorial_notes_and_keeps_tails():
@@ -81,9 +81,21 @@ def test_transcription_reader_resolves_conventions_and_scope():
     assert full.endswith("Adresse nicht verglichen")
 
 
-def test_unknown_kind_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="unknown kind"):
-        profiles.read_side(HSA, "pdf", tmp_path / "x")
+def test_marker_syntax_matches_the_pipeline_definition():
+    for name in ("UNCERTAIN", "ILLEGIBLE", "STRIKETHROUGH", "INSERTION"):
+        assert getattr(profiles, name) == getattr(markers, name), name
+
+
+def test_illegible_note_pattern_covers_the_shared_syntax():
+    for marker in ("[...]", "[... ~12 chars]", "[...~1 char]"):
+        assert re.fullmatch(markers.ILLEGIBLE, marker)
+        assert re.fullmatch(profiles.ILLEGIBLE_ANY_NOTE, marker)
+
+
+def test_manifest_schema_enums_match_profiles_and_kinds():
+    defs = json.loads(FIXTURE_SCHEMA.read_text(encoding="utf-8"))["$defs"]
+    assert set(defs["profile"]["enum"]) == set(profiles.PROFILES)
+    assert set(defs["kind"]["enum"]) == profiles.KINDS
 
 
 def test_identical_texts_score_zero():

@@ -24,9 +24,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Configure Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
-
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -34,7 +31,10 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked
+
+      - name: Check schema and human acceptance
+        run: uv run python pipeline/check_publication.py
 
       - name: Lint
         run: uv run ruff check .
@@ -45,8 +45,8 @@ jobs:
       - name: Test
         run: uv run pytest
 
-      - name: Check schema and human acceptance
-        run: uv run python pipeline/check_publication.py
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
       - name: Build publication data
         run: uv run python pipeline/06_build_frontend.py --force

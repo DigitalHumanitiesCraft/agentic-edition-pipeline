@@ -5,10 +5,10 @@ maturity tier, Git anchor and file hashes (schemas/evaluation-fixture.schema.jso
 Relative paths resolve against the manifest's directory, so a manifest can live
 outside the repositories it points into and still reference them read-only.
 
-Trust boundary: a manifest that fails the schema, names an unknown profile or
-an unknown kind is rejected as a whole (ManifestError). Missing files and hash
-mismatches are fixture-level findings the runner collects, so one bad fixture
-does not hide the others.
+Trust boundary: a manifest that fails the schema, which also restricts
+profiles and kinds to the known ones, is rejected as a whole (ManifestError).
+Missing files and hash mismatches are fixture-level findings the runner
+collects, so one bad fixture does not hide the others.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import profiles
+import jsonschema
 
 SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas"
 FIXTURE_SCHEMA = SCHEMA_DIR / "evaluation-fixture.schema.json"
@@ -51,16 +51,12 @@ class Fixture:
     reference_class: str
     maturity: str
     git_anchor: str | None
-    notes: str | None
 
 
 @dataclass
 class Manifest:
     path: Path
     name: str
-    created: str
-    profile: str | None
-    relaxng_schema: Path | None
     git_anchors: dict = field(default_factory=dict)
     fixtures: list[Fixture] = field(default_factory=list)
     sha256: str = ""
@@ -80,12 +76,6 @@ def load_json_schema(path: Path) -> dict:
 
 def validate_against_schema(instance: dict, schema_path: Path) -> list[str]:
     """Return human-readable schema violations (empty list means valid)."""
-    try:
-        import jsonschema
-    except ImportError as exc:  # pragma: no cover - environment guard
-        raise RuntimeError(
-            "jsonschema is required for aep_eval (pip install jsonschema)"
-        ) from exc
     validator = jsonschema.Draft202012Validator(load_json_schema(schema_path))
     problems = []
     for error in sorted(validator.iter_errors(instance), key=lambda e: list(e.path)):
@@ -133,8 +123,6 @@ def load_manifest(path: Path) -> Manifest:
 
     base = path.parent
     default_profile = data.get("profile")
-    if default_profile is not None:
-        profiles.get_profile(default_profile)
     fixtures: list[Fixture] = []
     seen: set[str] = set()
     for item in data["fixtures"]:
@@ -147,10 +135,6 @@ def load_manifest(path: Path) -> Manifest:
                 raise ManifestError(
                     f"fixture {item['id']!r}: cer check needs a profile"
                 )
-            try:
-                profiles.get_profile(profile_name)
-            except ValueError as exc:
-                raise ManifestError(f"fixture {item['id']!r}: {exc}") from exc
             if "hypothesis" not in item or "reference" not in item:
                 raise ManifestError(
                     f"fixture {item['id']!r}: cer check needs hypothesis and reference"
@@ -190,15 +174,11 @@ def load_manifest(path: Path) -> Manifest:
                 reference_class=item.get("reference_class", "none"),
                 maturity=item["maturity"],
                 git_anchor=item.get("git_anchor"),
-                notes=item.get("notes"),
             )
         )
     return Manifest(
         path=path,
         name=data["name"],
-        created=data["created"],
-        profile=default_profile,
-        relaxng_schema=_resolve(data.get("relaxng_schema"), base),
         git_anchors=data.get("git_anchors", {}),
         fixtures=fixtures,
         sha256=sha256_of(path),

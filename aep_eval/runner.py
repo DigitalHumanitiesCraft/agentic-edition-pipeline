@@ -105,7 +105,7 @@ def run_manifest(
                     records.append(evaluate_relaxng(fx, schema_cache))
             except (OSError, ValueError, RuntimeError) as exc:
                 message = f"{type(exc).__name__}: {exc}"
-                print(f"FEHLER {fx.id} [{check}] {message}", file=sys.stderr)
+                print(f"ERROR {fx.id} [{check}] {message}", file=sys.stderr)
                 errors.append({"fixture_id": fx.id, "stage": check, "message": message})
                 rec = _base_record(fx, check)
                 rec.message = message
@@ -125,7 +125,7 @@ def run(
     try:
         manifest = load_manifest(manifest_path)
     except ManifestError as exc:
-        print(f"FEHLER manifest: {exc}", file=sys.stderr)
+        print(f"ERROR manifest: {exc}", file=sys.stderr)
         return 2
     records, errors = run_manifest(manifest, fail_fast=fail_fast)
     report = build_report(manifest, records, errors, REPO_ROOT)
@@ -140,9 +140,9 @@ def run(
     print(f"written {json_path}\nwritten {md_path}")
     invalid = any(r.metric == "relaxng" and r.status == "invalid" for r in records)
     if errors:
-        print(f"FEHLER {len(errors)} fixture error(s)", file=sys.stderr)
+        print(f"ERROR {len(errors)} fixture error(s)", file=sys.stderr)
         return 1
     if strict and invalid:
-        print("FEHLER invalid TEI under --strict", file=sys.stderr)
+        print("ERROR invalid TEI under --strict", file=sys.stderr)
         return 1
     return 0

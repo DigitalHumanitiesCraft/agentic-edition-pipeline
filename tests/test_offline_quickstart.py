@@ -71,8 +71,10 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
         "_copy_runtime",
         lambda target: (target / "runtime-copied").write_text("ok", encoding="utf-8"),
     )
-    monkeypatch.setattr(runner, "_run_pipeline", lambda _target: None)
-    monkeypatch.setattr(runner, "_verify_outputs", lambda _target: {"objects": []})
+    monkeypatch.setattr(runner, "_run_pipeline", lambda _target, _environment: {})
+    monkeypatch.setattr(
+        runner, "_verify_outputs", lambda _target, _status, _env: {"objects": []}
+    )
 
 
 def _fixture(object_id: str) -> dict:
@@ -116,6 +118,7 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
         capture_output=True,
         text=True,
         check=False,
+        timeout=600,
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -123,8 +126,15 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
     assert report["objects"] == EXPECTED_IDS
     assert report["network_used"] is False
     assert report["validation_schema"] == "schemas/tei_all.rng"
+    assert report["evaluation_manifest"] == runner.EVALUATION_MANIFEST
     assert report["ownership_sentinel"] == runner.OWNERSHIP_SENTINEL
+    assert report["exit_status"] == {step.label: 0 for step in runner.PIPELINE_STEPS}
     assert all(report["checks"].values())
+    evaluation = json.loads(
+        (target / "results" / "evaluation" / "results.json").read_text(encoding="utf-8")
+    )
+    assert evaluation["errors"] == []
+    assert {r["fixture_id"] for r in evaluation["results"]} >= {"text-pair", "good-tei"}
     assert runner._has_valid_ownership_marker(target)
 
     for name in OPERATOR_DOCUMENTS:
@@ -193,12 +203,6 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
         assert catalog_item["title"] == expected_metadata["title"]
         assert catalog_item["date"] == expected_metadata["date"]
         assert catalog_item["language"] == expected_metadata["language"]
-        search_basis = " ".join(
-            catalog_item[field] for field in ("title", "date", "language")
-        ).lower()
-        assert expected_metadata["title"].lower() in search_basis
-        assert expected_metadata["date"] in search_basis
-        assert expected_metadata["language"] in search_basis
 
     handler = partial(_QuietHandler, directory=str(target / "docs"))
     with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
@@ -426,20 +430,61 @@ def test_pipeline_processes_receive_cleared_provider_environment(
 ) -> None:
     received: list[dict[str, str]] = []
 
-    def capture_run(*_args: object, **kwargs: object) -> None:
+    def capture_run(
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess:
         environment = kwargs["env"]
         assert isinstance(environment, dict)
         received.append(environment)
+        return subprocess.CompletedProcess(command, 0)
 
     for name in runner.OFFLINE_ENVIRONMENT:
         monkeypatch.setenv(name, "secret-or-provider")
     monkeypatch.setattr(runner.subprocess, "run", capture_run)
 
-    runner._run_pipeline(tmp_path)
+    runner._run_pipeline(tmp_path, runner._offline_environment())
 
     assert len(received) == len(runner.PIPELINE_STEPS)
     for environment in received:
         assert all(environment[name] == "" for name in runner.OFFLINE_ENVIRONMENT)
+
+
+def test_failed_check_steps_and_provider_settings_fail_verification(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    failing = {"RelaxNG validation", "evaluation fixtures"}
+
+    def fake_run(
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess:
+        label = next(
+            step.label
+            for step in runner.PIPELINE_STEPS
+            if command[1:] == step.arguments
+        )
+        return subprocess.CompletedProcess(command, 1 if label in failing else 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    exit_status = runner._run_pipeline(tmp_path, {})
+    assert exit_status == {
+        step.label: 1 if step.label in failing else 0 for step in runner.PIPELINE_STEPS
+    }
+
+    (tmp_path / "docs" / "data").mkdir(parents=True)
+    (tmp_path / "docs" / "data" / "catalog.json").write_text(
+        json.dumps({"objects": [{"id": object_id} for object_id in EXPECTED_IDS]}),
+        encoding="utf-8",
+    )
+    leaked = dict.fromkeys(runner.OFFLINE_ENVIRONMENT, "")
+    leaked["OPENAI_API_KEY"] = "secret-or-provider"
+    with pytest.raises(RuntimeError) as failure:
+        runner._verify_outputs(tmp_path, exit_status, leaked)
+    for check in (
+        "schema_valid",
+        "evaluation_fixtures",
+        "offline_provider_environment",
+    ):
+        assert check in str(failure.value)
 
 
 def test_schema_step_names_explicit_reported_schema() -> None:

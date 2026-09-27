@@ -28,60 +28,25 @@ import json
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 KINDS = frozenset({"text", "transcription-json", "tei", "tei-edition"})
 
+# Copied verbatim from pipeline/markers.py, the single definition of the
+# marker syntax. aep_eval stays importable without pipeline/, and
+# tests/test_aep_eval_cer.py fails when the two copies drift apart.
+UNCERTAIN = r"\[\?\]"
+ILLEGIBLE = r"\[\.\.\.(?:\s*~\s*\d+\s*chars?)?\]"
+STRIKETHROUGH = r"~~(.*?)~~"
+INSERTION = r"\{(.*?)\}"
 
-@dataclass(frozen=True)
-class Profile:
-    name: str
-    description: str
-    tei_extraction: str  # "itertext" or "comparison"
-    aggregate: str  # "char-weighted" or "fixture-mean"
-    value_field: str  # "cer" or "cer_fidelity"
-    source: str
-
-
-PROFILES: dict[str, Profile] = {
-    "hsa-strict": Profile(
-        name="hsa-strict",
-        description=(
-            "Whitespace collapsed, case and punctuation kept; editorial notes removed "
-            "from an edition reference; transcription conventions resolved in the "
-            "hypothesis; full Levenshtein; aggregate char-weighted."
-        ),
-        tei_extraction="itertext",
-        aggregate="char-weighted",
-        value_field="cer",
-        source="hsa-letters-pipeline tools/evaluate_cer.py",
-    ),
-    "zbz-fidelity": Profile(
-        name="zbz-fidelity",
-        description=(
-            "TEI body text with choice/corr, footnotes excluded, lb and pb handled; "
-            "quotes, dashes and French punctuation normalised symmetrically, NFC; "
-            "fidelity share of the Levenshtein distance (insertions of 50 or more "
-            "characters count as scope surplus); aggregate unweighted fixture mean."
-        ),
-        tei_extraction="comparison",
-        aggregate="fixture-mean",
-        value_field="cer_fidelity",
-        source="zbz-ocr-tei scripts/eval/evaluate_ocr.py",
-    ),
-}
-
-
-def get_profile(name: str) -> Profile:
-    try:
-        return PROFILES[name]
-    except KeyError:
-        known = ", ".join(sorted(PROFILES))
-        raise ValueError(f"unknown profile {name!r}; known profiles: {known}") from None
-
-
-# --- normalisation ---------------------------------------------------------
+# Wider than ILLEGIBLE on purpose, as in the hsa-strict source evaluator: it
+# also removes free-text illegibility notes such as "[... Arabic script,
+# ~1 word]". Narrowing it to ILLEGIBLE moves the Schuchardt regression anchor
+# of ADR-006 (hsa_letter_8669, distance 248 becomes 270).
+ILLEGIBLE_ANY_NOTE = r"\[\.\.\.[^\]]*\]"
 
 
 def normalise_whitespace(text: str) -> str:
@@ -96,7 +61,7 @@ def _zbz_base(text: str) -> str:
     return text.strip()
 
 
-def normalise_zbz(text: str, casefold: bool = False) -> str:
+def normalise_zbz(text: str) -> str:
     """Symmetric normalisation of zbz-ocr-tei, applied to both sides."""
     text = text.replace("\u00ab", '"').replace("\u00bb", '"').replace("\u201e", '"')
     text = text.replace("\u2039", "'").replace("\u203a", "'")
@@ -105,19 +70,46 @@ def normalise_zbz(text: str, casefold: bool = False) -> str:
         text = text.replace(dash, "-")
     text = text.replace("\u00ad", "")
     text = re.sub(r" +([;:?!])", r"\1", text)
-    if casefold:
-        text = text.casefold()
     text = _zbz_base(text)
     return unicodedata.normalize("NFC", text)
 
 
-def normalise(profile: Profile, text: str) -> str:
-    if profile.name == "zbz-fidelity":
-        return normalise_zbz(text)
-    return normalise_whitespace(text)
+@dataclass(frozen=True)
+class Profile:
+    name: str
+    tei_extraction: str  # "itertext" or "comparison"
+    aggregate: str  # "char-weighted" or "fixture-mean"
+    value_field: str  # "cer" or "cer_fidelity"
+    source: str
+    normalise: Callable[[str], str]
 
 
-# --- readers ---------------------------------------------------------------
+PROFILES: dict[str, Profile] = {
+    "hsa-strict": Profile(
+        name="hsa-strict",
+        tei_extraction="itertext",
+        aggregate="char-weighted",
+        value_field="cer",
+        source="hsa-letters-pipeline tools/evaluate_cer.py",
+        normalise=normalise_whitespace,
+    ),
+    "zbz-fidelity": Profile(
+        name="zbz-fidelity",
+        tei_extraction="comparison",
+        aggregate="fixture-mean",
+        value_field="cer_fidelity",
+        source="zbz-ocr-tei scripts/eval/evaluate_ocr.py",
+        normalise=normalise_zbz,
+    ),
+}
+
+
+def get_profile(name: str) -> Profile:
+    try:
+        return PROFILES[name]
+    except KeyError:
+        known = ", ".join(sorted(PROFILES))
+        raise ValueError(f"unknown profile {name!r}; known profiles: {known}") from None
 
 
 def _strip_namespaces(root: ET.Element) -> None:
@@ -129,24 +121,17 @@ def _strip_namespaces(root: ET.Element) -> None:
                 elem.attrib[key.split("}")[1]] = elem.attrib.pop(key)
 
 
-def _parse(path: Path) -> ET.Element | None:
-    try:
-        root = ET.fromstring(path.read_text(encoding="utf-8"))
-    except ET.ParseError:
-        return None
-    _strip_namespaces(root)
-    return root
-
-
 def read_tei_itertext(path: Path, drop_editorial_notes: bool) -> str:
     """Raw body text; optionally without note[@type='editorial'] (hsa-strict).
 
     Removing an element drops its tail, so the tail is handed to the previous
     sibling or the parent first, as the Schuchardt evaluator does.
     """
-    root = _parse(path)
-    if root is None:
-        raise ValueError(f"not well-formed XML: {path}")
+    try:
+        root = ET.fromstring(path.read_text(encoding="utf-8"))
+    except ET.ParseError as exc:
+        raise ValueError(f"not well-formed XML: {path}") from exc
+    _strip_namespaces(root)
     body = root.find(".//body")
     if body is None:
         return ""
@@ -165,7 +150,7 @@ def read_tei_itertext(path: Path, drop_editorial_notes: bool) -> str:
     return "".join(body.itertext())
 
 
-def read_tei_comparison(path: Path, include_footnotes: bool = False) -> str:
+def read_tei_comparison(path: Path) -> str:
     """Body text as zbz-ocr-tei extracts it for CER: choice takes corr, footnotes
     are excluded, lb without break='no' becomes a space, pb a paragraph break.
     A non-well-formed file falls back to tag stripping, as in the source."""
@@ -184,7 +169,7 @@ def read_tei_comparison(path: Path, include_footnotes: bool = False) -> str:
             corr = elem.find("corr")
             target = corr if corr is not None else elem.find("sic")
             return collect(target) if target is not None else ""
-        if elem.tag == "note" and elem.get("place") == "foot" and not include_footnotes:
+        if elem.tag == "note" and elem.get("place") == "foot":
             return ""
         if elem.text:
             parts.append(elem.text)
@@ -205,29 +190,33 @@ def read_tei_comparison(path: Path, include_footnotes: bool = False) -> str:
 
 def read_transcription_json(path: Path, pages: list[int] | None) -> str:
     """Pipeline transcription JSON (data contract): page texts in scope order
-    with the template's transcription conventions resolved to the reading they
-    assert ([?], [...], ~~deletion~~, {insertion})."""
+    with the transcription conventions resolved as the hsa-strict source
+    evaluator resolves them.
+
+    The uncertainty and illegibility brackets vanish and an insertion keeps
+    its text, as in markers.resolve_markers. Unlike resolve_markers, struck
+    text stays. Both reference extractions (itertext and the zbz comparison
+    reader) keep the content of <del>, which step 5 writes for ~~text~~, so
+    dropping it from the hypothesis alone would count every deletion as a
+    recognition error. Illegibility notes are matched by ILLEGIBLE_ANY_NOTE.
+    """
     record = json.loads(path.read_text(encoding="utf-8"))
     by_number = {int(p.get("page", 0)): p for p in record.get("pages", [])}
     order = pages if pages is not None else sorted(by_number)
     text = "\n".join(
         by_number[n].get("transcription", "") for n in order if n in by_number
     )
-    text = re.sub(r"\[\?\]", "", text)
-    text = re.sub(r"\[\.\.\.[^\]]*\]", "", text)
-    text = re.sub(r"~~(.*?)~~", r"\1", text)
-    text = re.sub(r"\{(.*?)\}", r"\1", text)
-    return text
+    text = re.sub(UNCERTAIN, "", text)
+    text = re.sub(ILLEGIBLE_ANY_NOTE, "", text)
+    text = re.sub(STRIKETHROUGH, r"\1", text)
+    return re.sub(INSERTION, r"\1", text)
 
 
 def read_side(
     profile: Profile, kind: str, path: Path, pages: list[int] | None = None
 ) -> str:
-    """Comparison text of one side of a fixture, normalised for the profile."""
-    if kind not in KINDS:
-        raise ValueError(
-            f"unknown kind {kind!r}; known kinds: {', '.join(sorted(KINDS))}"
-        )
+    """Comparison text of one side of a fixture, normalised for the profile.
+    The manifest schema restricts `kind` to KINDS."""
     if kind == "text":
         raw = path.read_text(encoding="utf-8")
     elif kind == "transcription-json":
@@ -236,4 +225,4 @@ def read_side(
         raw = read_tei_comparison(path)
     else:
         raw = read_tei_itertext(path, drop_editorial_notes=(kind == "tei-edition"))
-    return normalise(profile, raw)
+    return profile.normalise(raw)

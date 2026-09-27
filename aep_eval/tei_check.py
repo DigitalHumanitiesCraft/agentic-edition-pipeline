@@ -13,7 +13,6 @@ from pathlib import Path
 
 from lxml import etree
 
-TEI_NS = "http://www.tei-c.org/ns/1.0"
 MAX_ERRORS = 20
 
 

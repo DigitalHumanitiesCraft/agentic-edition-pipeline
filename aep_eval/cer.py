@@ -7,14 +7,17 @@ insertions are fidelity (real recognition errors), insertions of at least
 `scope_block_min` characters are scope surplus (hypothesis carries text the
 reference does not cover). fidelity + scope == total distance.
 
-rapidfuzz provides distance and opcodes from the same minimal alignment; a
-pure-Python backtrace would need O(n*m) memory and is out of reach for
-documents of several hundred thousand characters.
+rapidfuzz provides the opcodes of one minimal alignment, and the distance is
+their edit count, so a single alignment pass yields both; a pure-Python
+backtrace would need O(n*m) memory and is out of reach for documents of
+several hundred thousand characters.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+
+from rapidfuzz.distance import Levenshtein
 
 SCOPE_BLOCK_MIN = 50
 
@@ -66,29 +69,6 @@ def _rate(distance: int, reference_chars: int, hypothesis_chars: int) -> float:
     return distance / reference_chars
 
 
-def _opcodes(reference: str, hypothesis: str) -> list[tuple[str, int, int, int, int]]:
-    try:
-        from rapidfuzz.distance import Levenshtein
-    except ImportError as exc:  # pragma: no cover - environment guard
-        raise RuntimeError(
-            "rapidfuzz is required for aep_eval (pip install rapidfuzz)"
-        ) from exc
-    return [
-        (op.tag, op.src_start, op.src_end, op.dest_start, op.dest_end)
-        for op in Levenshtein.opcodes(reference, hypothesis)
-    ]
-
-
-def levenshtein(reference: str, hypothesis: str) -> int:
-    try:
-        from rapidfuzz.distance import Levenshtein
-    except ImportError as exc:  # pragma: no cover - environment guard
-        raise RuntimeError(
-            "rapidfuzz is required for aep_eval (pip install rapidfuzz)"
-        ) from exc
-    return Levenshtein.distance(reference, hypothesis)
-
-
 def score(
     reference: str, hypothesis: str, scope_block_min: int = SCOPE_BLOCK_MIN
 ) -> CerResult:
@@ -96,15 +76,15 @@ def score(
     normalisation; this function knows nothing about profiles."""
     fidelity = 0
     scope = 0
-    for tag, i1, i2, j1, j2 in _opcodes(reference, hypothesis):
-        ref_len, hyp_len = i2 - i1, j2 - j1
-        if tag == "equal":
+    for op in Levenshtein.opcodes(reference, hypothesis):
+        ref_len, hyp_len = op.src_end - op.src_start, op.dest_end - op.dest_start
+        if op.tag == "equal":
             continue
-        if tag == "replace":
+        if op.tag == "replace":
             fidelity += max(ref_len, hyp_len)
-        elif tag == "delete":
+        elif op.tag == "delete":
             fidelity += ref_len
-        elif tag == "insert":
+        elif op.tag == "insert":
             if hyp_len >= scope_block_min:
                 scope += hyp_len
             else:
@@ -112,7 +92,7 @@ def score(
     return CerResult(
         reference_chars=len(reference),
         hypothesis_chars=len(hypothesis),
-        distance=levenshtein(reference, hypothesis),
+        distance=fidelity + scope,
         fidelity_distance=fidelity,
         scope_insertion_distance=scope,
         scope_block_min=scope_block_min,

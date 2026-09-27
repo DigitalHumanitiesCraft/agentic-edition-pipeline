@@ -1,16 +1,12 @@
 """Synthetic checks for the RelaxNG conformance check."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
+from aep_eval import tei_check
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from aep_eval import tei_check  # noqa: E402
-
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
 MINI = FIXTURES / "mini.rng"
 

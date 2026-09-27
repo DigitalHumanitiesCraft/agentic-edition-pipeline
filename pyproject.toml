@@ -6,7 +6,7 @@ name = "agentic-edition-pipeline"
 version = "0.10.0"
 description = "Forkable repository template for digital edition workflows with an AI harness, reusable project knowledge and adaptable processing tools."
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Christopher Pollin", email = "office@dhcraft.org" }]
 dependencies = [
     "python-dotenv>=1.0",
@@ -18,11 +18,11 @@ dependencies = [
     "rapidfuzz>=3.0",
 ]
 
-[project.optional-dependencies]
-dev = ["pre-commit>=4.0", "pytest>=8.0", "ruff>=0.16.0"]
-
 [project.urls]
 Repository = "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline"
+
+[dependency-groups]
+dev = ["pre-commit>=4.0", "pytest>=8.0", "ruff>=0.16.0"]
 
 [tool.ruff]
 target-version = "py311"
@@ -40,3 +40,4 @@ allowed-confusables = ["–", "—"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "pipeline"]

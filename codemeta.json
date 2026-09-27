@@ -5,6 +5,8 @@
   "softwareVersion": "0.10.0",
   "description": "Forkable repository template for digital edition workflows with an AI harness, reusable project knowledge and adaptable processing tools.",
   "codeRepository": "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline",
+  "programmingLanguage": "Python",
+  "runtimePlatform": "Python >=3.11",
   "author": [
     {
       "@type": "Person",

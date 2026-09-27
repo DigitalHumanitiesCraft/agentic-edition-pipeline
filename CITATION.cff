@@ -3,6 +3,7 @@ message: "If you use this software, please cite it using these metadata."
 type: software
 title: "Agentic Edition Pipeline"
 version: "0.10.0"
+date-released: "2026-09-08"
 authors:
   - family-names: Pollin
     given-names: Christopher

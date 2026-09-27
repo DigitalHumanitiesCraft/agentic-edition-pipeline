@@ -5,16 +5,12 @@ unusable manifests.
 
 import json
 import shutil
-import sys
 from pathlib import Path
 
+from aep_eval.__main__ import main
+from aep_eval.manifest import RESULT_SCHEMA, validate_against_schema
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from aep_eval.__main__ import main  # noqa: E402
-from aep_eval.manifest import RESULT_SCHEMA, validate_against_schema  # noqa: E402
-
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
 
 

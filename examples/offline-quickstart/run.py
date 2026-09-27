@@ -3,7 +3,9 @@
 The runner copies the actual pipeline, schema, frontend, and knowledge
 templates into a disposable project directory. It overlays the filled example
 knowledge and contract-conformant transcriptions, then executes steps 4, 5,
-schema validation, and 6 through their public command-line interfaces.
+schema validation, 6 and the aep_eval fixture manifest through their public
+command-line interfaces. A failing build step stops the run; the two checking
+steps always run, and their exit statuses become report checks.
 
 Usage:
     python examples/offline-quickstart/run.py
@@ -36,6 +38,7 @@ OWNERSHIP_SENTINEL = ".aep-offline-quickstart-owner.json"
 OWNERSHIP_NAME = "agentic-edition-pipeline/offline-quickstart"
 OWNERSHIP_VERSION = 1
 VALIDATION_SCHEMA = "schemas/tei_all.rng"
+EVALUATION_MANIFEST = "tests/fixtures/evaluation/manifest.json"
 OFFLINE_ENVIRONMENT = {
     "GEMINI_API_KEY": "",
     "OPENAI_API_KEY": "",
@@ -54,6 +57,9 @@ class PipelineStep:
 
     label: str
     arguments: tuple[str, ...]
+    # A build step's failure leaves later steps without input; a checking
+    # step's failure is recorded and reported as a failed check instead.
+    stops_on_failure: bool = True
 
 
 PIPELINE_STEPS = (
@@ -68,8 +74,14 @@ PIPELINE_STEPS = (
     PipelineStep(
         "RelaxNG validation",
         ("pipeline/validate_schema.py", "--schema", VALIDATION_SCHEMA),
+        stops_on_failure=False,
     ),
     PipelineStep("static frontend build", ("pipeline/06_build_frontend.py", "--force")),
+    PipelineStep(
+        "evaluation fixtures",
+        ("-m", "aep_eval", EVALUATION_MANIFEST, "--out", "results/evaluation"),
+        stops_on_failure=False,
+    ),
 )
 
 
@@ -248,23 +260,32 @@ def _copy_runtime(target: Path) -> None:
         shutil.copy2(source, transcription_target / source.name)
 
 
-def _run_pipeline(target: Path) -> None:
-    """Execute the offline stages with provider settings disabled."""
+def _offline_environment() -> dict[str, str]:
+    """Child-process environment with every provider setting cleared."""
     environment = os.environ.copy()
     environment.update(OFFLINE_ENVIRONMENT)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    return environment
 
+
+def _run_pipeline(target: Path, environment: dict[str, str]) -> dict[str, int]:
+    """Execute the offline stages and return each step's exit status."""
+    exit_status: dict[str, int] = {}
     for step in PIPELINE_STEPS:
         print(f"\nRUN  {step.label}", flush=True)
-        subprocess.run(
+        completed = subprocess.run(
             (sys.executable, *step.arguments),
             cwd=target,
             env=environment,
-            check=True,
+            check=step.stops_on_failure,
         )
+        exit_status[step.label] = completed.returncode
+    return exit_status
 
 
-def _verify_outputs(target: Path) -> dict:
+def _verify_outputs(
+    target: Path, exit_status: dict[str, int], environment: dict[str, str]
+) -> dict:
     """Check the complete example result and return a machine-readable report."""
     expected_ids = sorted(
         path.stem for path in (EXAMPLE_ROOT / "corpus").glob("*.json")
@@ -293,9 +314,10 @@ def _verify_outputs(target: Path) -> dict:
             for object_id in expected_ids
         ),
         "catalog_complete": catalog_ids == expected_ids,
-        "schema_valid": True,
+        "schema_valid": exit_status.get("RelaxNG validation") == 0,
+        "evaluation_fixtures": exit_status.get("evaluation fixtures") == 0,
         "offline_provider_environment": all(
-            value == "" for value in OFFLINE_ENVIRONMENT.values()
+            environment.get(name) == "" for name in OFFLINE_ENVIRONMENT
         ),
     }
     failed = [name for name, passed in checks.items() if not passed]
@@ -312,7 +334,9 @@ def _verify_outputs(target: Path) -> dict:
         },
         "objects": expected_ids,
         "checks": checks,
+        "exit_status": exit_status,
         "validation_schema": VALIDATION_SCHEMA,
+        "evaluation_manifest": EVALUATION_MANIFEST,
         "network_used": False,
         "ownership_sentinel": OWNERSHIP_SENTINEL,
     }
@@ -329,8 +353,9 @@ def build(target: Path, force: bool = False) -> dict:
     _prepare_target(target, force)
     try:
         _copy_runtime(target)
-        _run_pipeline(target)
-        return _verify_outputs(target)
+        environment = _offline_environment()
+        exit_status = _run_pipeline(target, environment)
+        return _verify_outputs(target, exit_status, environment)
     except Exception:
         with contextlib.suppress(ValueError):
             _remove_owned_target(target)

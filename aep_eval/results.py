@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import __version__
 from .manifest import RESULT_SCHEMA, validate_against_schema
+from .profiles import get_profile
 
 RESULT_VERSION = "0.1"
 
@@ -61,8 +62,6 @@ def aggregate(records: list[Record]) -> list[dict]:
     """Per-profile CER aggregates and the RelaxNG tally. The aggregation
     method is part of the profile: char-weighted for hsa-strict, unweighted
     fixture mean for zbz-fidelity; both are named in the output."""
-    from .profiles import get_profile
-
     out: list[dict] = []
     by_profile: dict[str, list[Record]] = {}
     for r in records:
