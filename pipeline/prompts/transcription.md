@@ -29,7 +29,7 @@ Page classification. Besides its transcription, a page may carry a page_type fie
 
 Mixed pages. When a content page contains both text of the edited object and text of another author (e.g. the end of one article and the start of the next), transcribe everything, separate the parts into their own paragraphs (blank line between paragraphs), and list the 0-based indices of the foreign paragraphs in a foreign_paragraphs field on that page. On every other page, leave foreign_paragraphs empty or omit it.
 
-Return your result as a JSON object with the following structure. This is the pipeline data contract: pages at the top level, the page text under the key "transcription" (see knowledge/08_DATA_CONTRACT.md).
+Return your result as a JSON object with the following structure. This is the pipeline data contract: pages at the top level, the page text under the key "transcription".
 
 {
   "pages": [

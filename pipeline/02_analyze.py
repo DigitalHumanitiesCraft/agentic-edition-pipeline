@@ -75,7 +75,7 @@ def _count_json_pages(path: Path) -> int:
     """Page count for a structured transcription JSON (data contract).
 
     Reads the top-level pages array; a file without one counts as one page.
-    See knowledge/08_DATA_CONTRACT.md for the schema.
+    See reference/data-contract.md for the schema.
     """
     try:
         data = read_json(path)

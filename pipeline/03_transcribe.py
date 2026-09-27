@@ -5,7 +5,7 @@ document's page images through config.ordered_page_images, assembles the
 layered prompt (base rules, optional material profile, inventory metadata,
 optional per-object instructions) and writes
 data/processed/transcriptions/{id}.json according to
-knowledge/08_DATA_CONTRACT.md.
+reference/data-contract.md.
 
 Every document runs through the same chunk loop, also when it fits into one
 chunk. A chunk is served from a verified chunk-cache entry or sent to the
@@ -22,7 +22,7 @@ title unmarked.
 Helpers raise config.ItemFailure(stage, message); transcribe_document turns
 it into the error record, and main collects the records through finish_run.
 Call records land in data/processed/llm-calls/{id}/ and verified chunks in
-data/processed/chunk-cache/{id}/ (knowledge/provider-records.md).
+data/processed/chunk-cache/{id}/ (reference/provider-records.md).
 
 Usage:
     uv run python pipeline/03_transcribe.py --object ID [--force]

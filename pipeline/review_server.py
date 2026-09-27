@@ -3,7 +3,7 @@
 Run ``uv run python pipeline/review_server.py --port 8080`` from this repo.
 The server binds only 127.0.0.1. It stages deterministic steps 4–6 before
 publishing, preserves canonical snapshots, and rolls back failed writes.
-The human review contract in knowledge/08_DATA_CONTRACT.md stays in force.
+The human review contract in reference/data-contract.md stays in force.
 """
 
 from __future__ import annotations

@@ -63,7 +63,6 @@ def dependencies(root: Path, object_id: str, data: dict | None) -> list[dict]:
         {
             "id": "annotations",
             "status": state,
-            "detail": "Annotationen sind nur bei passender Textbindung aktuell.",
         }
     ]
 

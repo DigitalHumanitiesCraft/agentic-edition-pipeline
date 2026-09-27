@@ -109,8 +109,12 @@ def _derivation_hashes(data: dict, project: dict) -> dict[str, str]:
 
 
 def _diplomatic(project: dict) -> bool:
-    """Line breaks are meaning-bearing unless a normalised edition is declared."""
-    return "normalis" not in project.get("edition_type", "").lower()
+    """Line breaks are meaning-bearing unless a normalised edition is declared.
+
+    Both spellings count, so "Normalized transcription" is not read as diplomatic.
+    """
+    edition_type = project.get("edition_type", "").lower()
+    return "normalis" not in edition_type and "normaliz" not in edition_type
 
 
 # TEI generation (deterministic)

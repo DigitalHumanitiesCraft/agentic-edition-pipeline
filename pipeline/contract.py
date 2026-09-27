@@ -1,4 +1,4 @@
-"""Runtime checks for the pipeline data contract (knowledge/08_DATA_CONTRACT.md).
+"""Runtime checks for the pipeline data contract (reference/data-contract.md).
 
 The contract binds steps 3 to 6: object_id and pages at the top level, a
 provenance block under _meta, and per page an integer page number from 1 and
