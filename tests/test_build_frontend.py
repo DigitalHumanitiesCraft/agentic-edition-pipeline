@@ -43,7 +43,7 @@ def _prepare(monkeypatch, tmp_path, name: str, content: str):
     monkeypatch.setattr(step6, "DOCS_DIR", docs)
     monkeypatch.setattr(step6, "PROJECT_ROOT", project)
     monkeypatch.setattr(step6, "ensure_dirs", lambda: None)
-    monkeypatch.setattr(step6, "read_knowledge", lambda _n: "# Projekt")
+    monkeypatch.setattr(step6, "project_info", lambda: {"title": "Projekt"})
     monkeypatch.setattr(step6, "ordered_page_images", lambda _id: [])
     monkeypatch.setattr(sys, "argv", ["06_build_frontend.py"])
     return data, docs_tei
@@ -186,8 +186,10 @@ def test_tei_without_page_break_becomes_one_viewer_page():
 def test_frontend_client_uses_the_catalog_page_count_contract():
     script = (step6.DOCS_DIR / "js" / "app.js").read_text(encoding="utf-8")
 
-    assert '{ key: "page_count", label: "Seiten" }' in script
-    assert "it.page_count != null ? it.page_count" in script
+    assert '{key: "page_count", label: "Seiten"}' in script
+    assert (
+        'for (const key of ["signature", "date", "language", "page_count"])' in script
+    )
 
 
 def test_frontend_blocks_facsimile_bytes_that_differ_from_tei_provenance(

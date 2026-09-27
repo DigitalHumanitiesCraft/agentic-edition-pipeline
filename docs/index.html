@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' http: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Digitale Edition – Katalog und Dokumentansicht">
   <title>Digitale Edition</title>
   <link rel="stylesheet" href="css/style.css">
@@ -17,13 +18,12 @@
     </div>
   </header>
 
-  <main id="app" role="main">
-    <p>Lade Katalog&hellip;</p>
+  <main>
+    <p id="notice" class="notice" role="status"></p>
+    <div id="app">
+      <p>Lade Katalog&hellip;</p>
+    </div>
   </main>
-
-  <footer>
-    <p>Zitations-, Lizenz- und Rechteangaben werden im Editionsprojekt konfiguriert.</p>
-  </footer>
 
   <script type="module" src="js/app.js"></script>
 </body>

@@ -1,247 +1,264 @@
-/* Agentic Edition Pipeline – Frontend (Vanilla JS)
-   No dependencies. Hash-based routing. Works locally and on GitHub Pages. */
+// Hash-routed static viewer, served by GitHub Pages or the local review server.
+import {badge, element, fetchJson} from "./dom.js";
 import {canLeave, mountReview, unmountReview} from "./review-editor.js";
 
-(function () {
-  "use strict";
+const state = {catalog: null, currentObject: null, currentPage: 0, sortColumn: null, sortAsc: true};
+const app = document.getElementById("app");
+const notice = document.getElementById("notice");
+const titleEl = document.getElementById("project-title");
+const COLUMNS = [
+  {key: "title", label: "Titel"}, {key: "signature", label: "Signatur"},
+  {key: "date", label: "Datum"}, {key: "language", label: "Sprache"},
+  {key: "page_count", label: "Seiten"}, {key: "status", label: "Status"}
+];
+let routeVersion = 0;
+let currentHash = location.hash;
+let viewer = null;
 
-  var state = {
-    catalog: null, projectTitle: null, currentObject: null,
-    currentPage: 0, sortColumn: null, sortAsc: true
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
   };
-  var app = document.getElementById("app");
-  var titleEl = document.getElementById("project-title");
-  let routeVersion = 0;
-  let currentHash = location.hash;
+}
 
-  // -- Utility --
-  function debounce(fn, ms) {
-    var t; return function () {
-      var a = arguments, c = this;
-      clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms);
-    };
-  }
-  function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
-  function triggerDownload(blob, name) {
-    var u = URL.createObjectURL(blob), a = document.createElement("a");
-    a.href = u; a.download = name; document.body.appendChild(a);
-    a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
-  }
+function showMessage(text) {
+  app.replaceChildren();
+  element("p", text, app, "catalog-empty");
+}
 
-  // -- Data loading --
-  function loadCatalog() {
-    return fetch("data/catalog.json").then(function (r) {
-      if (!r.ok) throw new Error("catalog.json not found (" + r.status + ")");
-      return r.json();
-    }).then(function (d) {
-      if (Array.isArray(d)) { state.catalog = d; }
+// TEI graphic/@url is untrusted, so only web URLs reach img.src.
+function imageUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(value, document.baseURI);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+async function loadCatalog() {
+  const data = await fetchJson("data/catalog.json");
+  if (!Array.isArray(data.objects)) throw new Error("catalog.json enthält keine Objektliste");
+  state.catalog = data.objects;
+  if (data.project) {
+    titleEl.textContent = data.project;
+    document.title = data.project;
+  }
+}
+
+function loadObject(id) {
+  return fetchJson("data/" + encodeURIComponent(id) + ".json");
+}
+
+function getRoute() {
+  const h = location.hash.replace(/^#\/?/, "");
+  const m = h.match(/^viewer\/(.+)$/);
+  return m ? {view: "viewer", id: decodeURIComponent(m[1])} : {view: "catalog"};
+}
+
+function navigate() {
+  if (!canLeave()) {
+    history.replaceState(null, "", currentHash || "#catalog");
+    return;
+  }
+  unmountReview();
+  currentHash = location.hash;
+  notice.textContent = "";
+  const version = ++routeVersion;
+  const route = getRoute();
+  updateActiveNav(route.view);
+  if (route.view === "catalog") {
+    renderCatalog();
+    return;
+  }
+  showMessage("Lade …");
+  loadObject(route.id).then(object => {
+    if (version !== routeVersion) return;
+    state.currentObject = object;
+    state.currentPage = 0;
+    renderViewer(route.id);
+  }).catch(error => {
+    if (version === routeVersion) showMessage("Fehler: " + error.message);
+  });
+}
+
+function updateActiveNav(view) {
+  document.querySelectorAll(".nav-link").forEach(link => {
+    link.classList.toggle("active", link.dataset.view === view || (view === "viewer" && link.dataset.view === "catalog"));
+  });
+}
+
+function renderCatalog() {
+  if (!state.catalog) {
+    showMessage("Kein Katalog geladen.");
+    return;
+  }
+  app.replaceChildren();
+  const input = element("input", undefined, app, "search-input");
+  input.type = "search";
+  input.placeholder = "Suche nach Titel oder Datum …";
+  input.setAttribute("aria-label", "Katalog durchsuchen");
+  const table = element("table", undefined, element("div", undefined, app, "table-scroll"), "catalog-table");
+  const headRow = element("tr", undefined, element("thead", undefined, table));
+  const tbody = element("tbody", undefined, table);
+  const headers = COLUMNS.map(column => {
+    const th = element("th", undefined, headRow);
+    th.scope = "col";
+    const button = element("button", column.label, th, "sort-button");
+    button.type = "button";
+    element("span", "", button, "sort-arrow").setAttribute("aria-hidden", "true");
+    button.addEventListener("click", () => {
+      if (state.sortColumn === column.key) state.sortAsc = !state.sortAsc;
       else {
-        // 06_build_frontend.py writes {project, objects, ...}; older data
-        // used {projectTitle, items}. Accept both shapes.
-        state.projectTitle = d.projectTitle || d.project || null;
-        state.catalog = d.items || d.objects || [];
+        state.sortColumn = column.key;
+        state.sortAsc = true;
       }
-      state.catalog.forEach(function (o) {
-        if (o.page_count == null && o.pages != null) o.page_count = o.pages;
-      });
-      if (state.projectTitle) { titleEl.textContent = state.projectTitle; document.title = state.projectTitle; }
+      renderRows();
     });
-  }
-  function loadObject(id) {
-    return fetch("data/" + encodeURIComponent(id) + ".json", {cache: "no-store"}).then(function (r) {
-      if (!r.ok) throw new Error(id + ".json not found (" + r.status + ")");
-      return r.json();
-    });
-  }
+    return th;
+  });
 
-  // -- Router --
-  function getRoute() {
-    var h = window.location.hash.replace(/^#\/?/, "");
-    if (!h || h === "catalog") return { view: "catalog" };
-    var m = h.match(/^viewer\/(.+)$/);
-    return m ? { view: "viewer", id: decodeURIComponent(m[1]) } : { view: "catalog" };
-  }
-  function navigate() {
-    if (!canLeave()) { history.replaceState(null, "", currentHash || "#catalog"); return; }
-    unmountReview();
-    currentHash = location.hash;
-    const version = ++routeVersion;
-    var route = getRoute();
-    updateActiveNav(route.view);
-    if (route.view === "catalog") { renderCatalog(); }
-    else if (route.view === "viewer") {
-      app.innerHTML = "<p>Lade&hellip;</p>";
-      loadObject(route.id).then(function (object) {
-        if (version !== routeVersion) return;
-        state.currentObject = object; state.currentPage = 0; renderViewer(route.id);
-      }).catch(function (e) { if (version === routeVersion) app.innerHTML = '<p class="catalog-empty">Fehler: ' + esc(e.message) + "</p>"; });
+  function renderRows() {
+    COLUMNS.forEach((column, index) => {
+      const th = headers[index];
+      const sorted = state.sortColumn === column.key;
+      if (sorted) th.setAttribute("aria-sort", state.sortAsc ? "ascending" : "descending");
+      else th.removeAttribute("aria-sort");
+      th.querySelector(".sort-arrow").textContent = sorted ? (state.sortAsc ? "▲" : "▼") : "";
+    });
+    tbody.replaceChildren();
+    const items = sortItems(state.catalog.slice());
+    if (!items.length) {
+      element("td", "Keine Einträge.", element("tr", undefined, tbody), "catalog-empty").colSpan = COLUMNS.length;
     }
-  }
-  function updateActiveNav(view) {
-    document.querySelectorAll(".nav-link").forEach(function (l) {
-      var match = l.dataset.view === view || (view === "viewer" && l.dataset.view === "catalog");
-      l.classList.toggle("active", match);
-    });
-  }
-
-  // -- Catalog view --
-  function renderCatalog() {
-    if (!state.catalog) { app.innerHTML = '<p class="catalog-empty">Kein Katalog geladen.</p>'; return; }
-    var cols = [
-      { key: "title", label: "Titel" }, { key: "signature", label: "Signatur" },
-      { key: "date", label: "Datum" },
-      { key: "language", label: "Sprache" }, { key: "page_count", label: "Seiten" },
-      { key: "status", label: "Status" }
-    ];
-    var html = '<input type="search" class="search-input" placeholder="Suche nach Titel oder Datum&hellip;" aria-label="Katalog durchsuchen">';
-    html += '<table class="catalog-table"><thead><tr>';
-    cols.forEach(function (c) {
-      var arrow = state.sortColumn === c.key ? (state.sortAsc ? " &#9650;" : " &#9660;") : "";
-      html += '<th data-sort="' + c.key + '">' + c.label + '<span class="sort-arrow">' + arrow + "</span></th>";
-    });
-    html += "</tr></thead><tbody>";
-    var items = sortItems(state.catalog.slice());
-    if (!items.length) { html += '<tr><td colspan="6" class="catalog-empty">Keine Eintr&auml;ge.</td></tr>'; }
-    else { items.forEach(function (it) {
-      html += "<tr>";
-      html += '<td><a href="#viewer/' + encodeURIComponent(it.id) + '">' + esc(it.title || it.id) + "</a></td>";
-      html += "<td>" + esc(it.signature || "") + "</td><td>" + esc(it.date || "") + "</td><td>" + esc(it.language || "") + "</td>";
-      html += "<td>" + (it.page_count != null ? it.page_count : "") + "</td>";
-      html += "<td>" + badgeHtml(it.status) + "</td></tr>";
-    }); }
-    html += "</tbody></table>";
-    app.innerHTML = html;
-    var input = app.querySelector(".search-input");
-    input.addEventListener("input", debounce(function () { filterCatalog(input.value); }, 200));
-    app.querySelectorAll("th[data-sort]").forEach(function (th) {
-      th.addEventListener("click", function () {
-        var k = th.dataset.sort;
-        if (state.sortColumn === k) state.sortAsc = !state.sortAsc;
-        else { state.sortColumn = k; state.sortAsc = true; }
-        var q = input.value;
-        renderCatalog();
-        var ni = app.querySelector(".search-input");
-        if (ni && q) { ni.value = q; filterCatalog(q); }
-      });
-    });
-  }
-  function sortItems(items) {
-    if (!state.sortColumn) return items;
-    var k = state.sortColumn, d = state.sortAsc ? 1 : -1;
-    return items.sort(function (a, b) {
-      var va = a[k] != null ? a[k] : "", vb = b[k] != null ? b[k] : "";
-      if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
-      return String(va).localeCompare(String(vb), "de") * d;
-    });
-  }
-  function badgeHtml(s) {
-    if (!s) return "";
-    var labels = {
-      machine_unreviewed: "Maschinell, ungepr&uuml;ft",
-      in_review: "In Pr&uuml;fung",
-      human_verified: "Menschlich gepr&uuml;ft",
-      accepted: "Abgenommen",
-      confident: "Automatisch unauff&auml;llig",
-      needs_review: "Automatische Pr&uuml;fung n&ouml;tig",
-      problematic: "Automatischer Problembefund"
-    };
-    return '<span class="badge badge-' + String(s).replace(/[^a-zA-Z0-9_-]/g, "_") + '">' +
-      (labels[s] || esc(s)) + "</span>";
-  }
-  function filterCatalog(q) {
-    q = q.toLowerCase();
-    app.querySelectorAll(".catalog-table tbody tr").forEach(function (r) {
-      r.style.display = r.textContent.toLowerCase().indexOf(q) !== -1 ? "" : "none";
-    });
-  }
-
-  // -- Viewer --
-  function renderViewer(objectId) {
-    var obj = state.currentObject;
-    if (!obj) return;
-    var pages = obj.pages || [], has = pages.length > 0;
-    var html = '<div class="viewer-header"><h2>' + esc(obj.title || objectId) + "</h2>";
-    html += badgeHtml(obj.status);
-    html += '<div class="viewer-actions">';
-    html += '<button class="btn" id="btn-tei">TEI-XML herunterladen</button>';
-    html += '<button class="btn" id="btn-txt">Plaintext exportieren</button>';
-    html += '<a href="#catalog" class="btn">Zur&uuml;ck</a></div></div>';
-    if (has) {
-      html += '<div class="viewer-panels">';
-      html += '<div class="panel"><div class="panel-label">Faksimile</div><div class="panel-image" id="img-panel"></div></div>';
-      html += '<div class="panel"><div class="panel-label">Text</div><div class="panel-text" id="txt-panel"></div><div id="review-panel"></div></div>';
-      html += '</div><div class="page-nav">';
-      html += '<button id="btn-prev" aria-label="Vorherige Seite">Zur&uuml;ck</button>';
-      html += '<span class="page-counter" id="pg-count"></span>';
-      html += '<button id="btn-next" aria-label="N&auml;chste Seite">Weiter</button></div>';
-    } else { html += '<p class="catalog-empty">Keine Seiten vorhanden.</p>'; }
-    app.innerHTML = html;
-    if (has) {
-      showPage();
-      document.getElementById("btn-prev").addEventListener("click", function () { navigatePage(-1); });
-      document.getElementById("btn-next").addEventListener("click", function () { navigatePage(1); });
+    for (const item of items) {
+      const row = element("tr", undefined, tbody);
+      element("a", item.title || item.id, element("td", undefined, row)).href = "#viewer/" + encodeURIComponent(item.id);
+      for (const key of ["signature", "date", "language", "page_count"]) element("td", item[key] ?? "", row);
+      badge(item.status, element("td", undefined, row));
     }
-    document.getElementById("btn-tei").addEventListener("click", function () { downloadTEI(objectId); });
-    document.getElementById("btn-txt").addEventListener("click", function () { exportPlaintext(objectId); });
-  }
-  function showPage() {
-    var pages = state.currentObject.pages || [], pg = pages[state.currentPage];
-    if (!pg) return;
-    var ip = document.getElementById("img-panel"), tp = document.getElementById("txt-panel");
-    var ct = document.getElementById("pg-count");
-    var label = pg.label || String(state.currentPage + 1);
-    if (pg.image) ip.innerHTML = '<img src="' + esc(pg.image) + '" alt="Faksimile Seite ' + esc(label) + '">';
-    else ip.innerHTML = '<span class="no-image">Kein Bild verf&uuml;gbar</span>';
-    tp.textContent = pg.text || "(kein Text)";
-    ct.textContent = "Seite " + label + " (" + (state.currentPage + 1) + " von " + pages.length + ")";
-    document.getElementById("btn-prev").disabled = state.currentPage === 0;
-    document.getElementById("btn-next").disabled = state.currentPage >= pages.length - 1;
-    const reviewHost = document.getElementById("review-panel");
-    reviewHost.replaceChildren();
-    mountReview(reviewHost, state.currentObject, state.currentPage, async function (message) {
-      const pageIndex = state.currentPage;
-      const id = state.currentObject.id;
-      state.currentObject = await loadObject(id);
-      await loadCatalog();
-      state.currentPage = pageIndex;
-      renderViewer(id);
-      const notice = document.createElement("p");
-      notice.setAttribute("role", "status");
-      notice.textContent = message;
-      app.prepend(notice);
-    });
-  }
-  function navigatePage(delta) {
-    var pages = state.currentObject.pages || [], n = state.currentPage + delta;
-    if (n < 0 || n >= pages.length) return;
-    if (!canLeave()) return;
-    state.currentPage = n; showPage();
+    filterCatalog(input.value);
   }
 
-  // -- Downloads --
-  function downloadTEI(id) {
-    var a = document.createElement("a");
-    a.href = "tei/" + encodeURIComponent(id) + ".xml"; a.download = id + ".xml";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  }
-  function exportPlaintext(id) {
-    var obj = state.currentObject;
-    if (!obj || !obj.pages) return;
-    var txt = obj.pages.map(function (p, i) {
-      return "--- Seite " + (p.label || (i + 1)) + " ---\n" + (p.text || "");
-    }).join("\n\n");
-    triggerDownload(new Blob([txt], { type: "text/plain;charset=utf-8" }), id + ".txt");
-  }
+  input.addEventListener("input", debounce(() => filterCatalog(input.value), 200));
+  renderRows();
+}
 
-  // -- Init --
-  function init() {
-    loadCatalog().then(navigate).catch(function (e) {
-      app.innerHTML = '<p class="catalog-empty">Katalog konnte nicht geladen werden.<br><small>' +
-        esc(e.message) + '</small></p><p class="catalog-empty"><small>Stellen Sie sicher, dass ' +
-        "<code>docs/data/catalog.json</code> existiert.</small></p>";
-    });
-    window.addEventListener("hashchange", navigate);
+function sortItems(items) {
+  if (!state.sortColumn) return items;
+  const k = state.sortColumn;
+  const d = state.sortAsc ? 1 : -1;
+  return items.sort((a, b) => {
+    const va = a[k] ?? "";
+    const vb = b[k] ?? "";
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
+    return String(va).localeCompare(String(vb), "de") * d;
+  });
+}
+
+function filterCatalog(q) {
+  q = q.toLowerCase();
+  app.querySelectorAll(".catalog-table tbody tr").forEach(r => {
+    r.hidden = r.textContent.toLowerCase().indexOf(q) === -1;
+  });
+}
+
+function renderViewer(id) {
+  const obj = state.currentObject;
+  if (!obj) return;
+  const pages = obj.pages || [];
+  app.replaceChildren();
+  viewer = null;
+  const header = element("div", undefined, app, "viewer-header");
+  element("h2", obj.title || id, header);
+  badge(obj.status, header);
+  const actions = element("div", undefined, header, "viewer-actions");
+  const a = element("a", "TEI-XML herunterladen", actions, "btn");
+  a.href = "tei/" + encodeURIComponent(id) + ".xml";
+  a.download = id + ".xml";
+  const plaintext = element("button", "Plaintext exportieren", actions, "btn");
+  plaintext.type = "button";
+  plaintext.addEventListener("click", () => exportPlaintext(id));
+  element("a", "Zum Katalog", actions, "btn").href = "#catalog";
+  if (!pages.length) {
+    element("p", "Keine Seiten vorhanden.", app, "catalog-empty");
+    return;
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-  else init();
-})();
+  const panels = element("div", undefined, app, "viewer-panels");
+  const imagePanel = element("section", undefined, panels, "panel");
+  imagePanel.setAttribute("aria-label", "Faksimile");
+  const textPanel = element("section", undefined, panels, "panel");
+  textPanel.setAttribute("aria-label", "Text");
+  const pageNav = element("div", undefined, app, "page-nav");
+  viewer = {
+    image: element("div", undefined, imagePanel, "panel-image"),
+    text: element("div", undefined, textPanel, "panel-text"),
+    review: element("div", undefined, textPanel),
+    prev: element("button", "Vorherige Seite", pageNav),
+    counter: element("span", undefined, pageNav, "page-counter"),
+    next: element("button", "Nächste Seite", pageNav)
+  };
+  viewer.prev.type = "button";
+  viewer.next.type = "button";
+  viewer.prev.addEventListener("click", () => navigatePage(-1));
+  viewer.next.addEventListener("click", () => navigatePage(1));
+  showPage();
+}
+
+function showPage() {
+  const pages = state.currentObject.pages;
+  const pg = pages[state.currentPage];
+  const label = pg.label || String(state.currentPage + 1);
+  const src = imageUrl(pg.image);
+  if (src) {
+    const img = element("img");
+    img.src = src;
+    img.alt = "Faksimile Seite " + label;
+    viewer.image.replaceChildren(img);
+  } else {
+    viewer.image.replaceChildren(element("span", pg.image ? "Bildadresse nicht zulässig" : "Kein Bild verfügbar", undefined, "no-image"));
+  }
+  viewer.text.textContent = pg.text || "(kein Text)";
+  viewer.counter.textContent = `Seite ${label} (${state.currentPage + 1} von ${pages.length})`;
+  viewer.prev.disabled = state.currentPage === 0;
+  viewer.next.disabled = state.currentPage >= pages.length - 1;
+  viewer.review.replaceChildren();
+  mountReview(viewer.review, state.currentObject, state.currentPage, reloadAfterSave);
+}
+
+async function reloadAfterSave(text) {
+  const pageIndex = state.currentPage;
+  const id = state.currentObject.id;
+  state.currentObject = await loadObject(id);
+  await loadCatalog();
+  state.currentPage = pageIndex;
+  renderViewer(id);
+  notice.textContent = text;
+}
+
+function navigatePage(delta) {
+  const n = state.currentPage + delta;
+  if (n < 0 || n >= state.currentObject.pages.length || !canLeave()) return;
+  notice.textContent = "";
+  state.currentPage = n;
+  showPage();
+}
+
+function exportPlaintext(id) {
+  const txt = state.currentObject.pages
+    .map((p, i) => `--- Seite ${p.label || i + 1} ---\n${p.text || ""}`)
+    .join("\n\n");
+  const url = URL.createObjectURL(new Blob([txt], {type: "text/plain;charset=utf-8"}));
+  const link = element("a", undefined, document.body);
+  link.href = url;
+  link.download = id + ".txt";
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+loadCatalog().then(navigate).catch(error => showMessage("Katalog konnte nicht geladen werden: " + error.message));
+window.addEventListener("hashchange", navigate);
