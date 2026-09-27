@@ -182,7 +182,9 @@ def test_inventory_marks_sources_without_page_images(monkeypatch, tmp_path):
 
     flags = {doc["id"]: doc["transcribable"] for doc in inventory["documents"]}
     assert flags == {"notes": False, "scan": True}
-    assert "| notes | text |" in step2.inventory_to_markdown(inventory)
+    table = step2.inventory_to_markdown(inventory)
+    assert "| notes | text | 1 | txt |" in table
+    assert table.count("| no, no page images |") == 1
 
 
 def test_extracted_manifest_hashes_are_verified(monkeypatch, tmp_path):

@@ -386,20 +386,20 @@ def build_inventory(documents: dict[str, dict]) -> dict:
 def inventory_to_markdown(inventory: dict) -> str:
     s = inventory["summary"]
     lines = [
-        "| Eigenschaft | Wert |",
+        "| Property | Value |",
         "|---|---|",
-        f"| Dokumente gesamt | {s['total_documents']} |",
-        f"| Seiten gesamt | {s['total_pages']} |",
-        f"| Quellentypen | {', '.join(f'{k} ({v})' for k, v in s['source_types'].items())} |",
-        f"| Sprachen | {', '.join(s['languages']) if s['languages'] else '(noch nicht bestimmt)'} |",
+        f"| Documents | {s['total_documents']} |",
+        f"| Pages | {s['total_pages']} |",
+        f"| Source types | {', '.join(f'{k} ({v})' for k, v in s['source_types'].items())} |",
+        f"| Languages | {', '.join(s['languages']) if s['languages'] else '(not yet determined)'} |",
         "",
-        "### Dokumente",
+        "### Documents",
         "",
-        "| ID | Typ | Seiten | Format | Pfad | Schritt 3 |",
+        "| ID | Type | Pages | Format | Path | Step 3 |",
         "|---|---|---|---|---|---|",
     ]
     for doc in inventory["documents"]:
-        step3 = "ja" if doc["transcribable"] else "nein, keine Seitenbilder"
+        step3 = "yes" if doc["transcribable"] else "no, no page images"
         lines.append(
             f"| {doc['id']} | {doc['source_type']} | {doc['pages']} | {doc['format']} "
             f"| {doc['path']} | {step3} |"
