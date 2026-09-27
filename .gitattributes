@@ -1,0 +1,6 @@
+# The pipeline compares TEI and JSON outputs byte for byte, so every checkout
+# must carry LF line endings regardless of core.autocrlf.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
