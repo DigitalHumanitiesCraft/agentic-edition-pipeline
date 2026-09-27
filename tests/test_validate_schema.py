@@ -1,26 +1,28 @@
 """Runnable checks for the schema validation runner (ADR-005).
 
 Covers: the per-fork validation target in config, per-file valid/invalid
-reporting, the clear failure when the configured schema file is absent, and
-the offline path from a transcription file through steps 4 and 5 to TEI that
-validates against the shipped default schema.
+reporting and exit status, the clear failure when the configured schema file
+is absent, and the offline path from a transcription file through steps 4
+and 5 to TEI that validates against the shipped TEI All schema.
 """
 
-import json
+import importlib
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
-from conftest import load_step
+import config
+import validate_schema as vs
+from conftest import EVALUATION_FIXTURES as FIXTURES
+from conftest import read_json
 
-config = load_step("config")
-vs = load_step("validate_schema")
-step4 = load_step("04_validate")
-step5 = load_step("05_annotate_tei")
+step4 = importlib.import_module("04_validate")
+step5 = importlib.import_module("05_annotate_tei")
 
-FIXTURES = Path(__file__).parent / "fixtures" / "evaluation"
 
 MINI_RNG = """<grammar xmlns="http://relaxng.org/ns/structure/1.0">
   <start>
@@ -32,26 +34,37 @@ MINI_RNG = """<grammar xmlns="http://relaxng.org/ns/structure/1.0">
 """
 
 
-def test_default_target_comes_from_config():
-    assert Path(config.VALIDATION_SCHEMA).parent == config.SCHEMAS_DIR
-    assert Path(config.VALIDATION_SCHEMA).exists()
-
-
-def test_compiled_schema_is_reused_until_the_file_changes(tmp_path):
+@pytest.fixture
+def mini_schema(tmp_path) -> Path:
     schema = tmp_path / "mini.rng"
     schema.write_text(MINI_RNG, encoding="utf-8")
+    return schema
 
-    first = vs.load_schema(schema)
-    assert vs.load_schema(schema) is first
 
-    schema.write_text(MINI_RNG.replace('name="p"', 'name="q"'), encoding="utf-8")
-    os.utime(schema, ns=(0, schema.stat().st_mtime_ns + 1_000_000_000))
-    changed = vs.load_schema(schema)
+def _documents(tmp_path) -> tuple[Path, Path]:
+    good = tmp_path / "good.xml"
+    good.write_text("<doc><p>x</p></doc>", encoding="utf-8")
+    bad = tmp_path / "bad.xml"
+    bad.write_text("<doc><q/></doc>", encoding="utf-8")
+    return good, bad
+
+
+def test_configured_validation_target_exists():
+    assert Path(config.VALIDATION_SCHEMA).is_file()
+
+
+def test_compiled_schema_is_reused_until_the_file_changes(tmp_path, mini_schema):
+    first = vs.load_schema(mini_schema)
+    assert vs.load_schema(mini_schema) is first
+
+    mini_schema.write_text(MINI_RNG.replace('name="p"', 'name="q"'), encoding="utf-8")
+    os.utime(mini_schema, ns=(0, mini_schema.stat().st_mtime_ns + 1_000_000_000))
+    changed = vs.load_schema(mini_schema)
 
     assert changed is not first
     doc = tmp_path / "doc.xml"
     doc.write_text("<doc><q>x</q></doc>", encoding="utf-8")
-    assert vs.validate_files(schema, [doc])[0].valid
+    assert vs.validate_files(mini_schema, [doc])[0].valid
 
 
 def test_invalid_schema_raises_value_error_naming_the_path(tmp_path):
@@ -64,19 +77,19 @@ def test_invalid_schema_raises_value_error_naming_the_path(tmp_path):
         vs.validate_files(schema, [])
 
 
-def test_valid_and_invalid_files_are_reported(tmp_path):
-    schema = tmp_path / "mini.rng"
-    schema.write_text(MINI_RNG, encoding="utf-8")
-    good = tmp_path / "good.xml"
-    good.write_text("<doc><p>x</p></doc>", encoding="utf-8")
-    bad = tmp_path / "bad.xml"
-    bad.write_text("<doc><q/></doc>", encoding="utf-8")
+def test_valid_and_invalid_files_are_reported(tmp_path, mini_schema):
+    good, bad = _documents(tmp_path)
+    malformed = tmp_path / "malformed.xml"
+    malformed.write_text("<doc>", encoding="utf-8")
 
-    results = vs.validate_files(schema, [good, bad])
-    by_name = {r.path.name: r for r in results}
+    by_name = {
+        r.path.name: r for r in vs.validate_files(mini_schema, [good, bad, malformed])
+    }
+
     assert by_name["good.xml"].valid
     assert not by_name["bad.xml"].valid
     assert by_name["bad.xml"].errors
+    assert by_name["malformed.xml"].errors[0].startswith("not well-formed")
 
 
 def test_missing_schema_fails_with_pointer(tmp_path):
@@ -85,44 +98,60 @@ def test_missing_schema_fails_with_pointer(tmp_path):
     assert "VALIDATION_SCHEMA" in str(exc.value)
 
 
-def test_offline_path_produces_tei_valid_against_the_default_schema(tmp_path):
+@pytest.mark.parametrize(
+    ("documents", "schema_name", "code"),
+    [
+        (["good"], "mini.rng", 0),
+        (["good", "bad"], "mini.rng", 1),
+        (["good"], "absent.rng", 2),
+    ],
+    ids=["all-valid", "one-invalid", "missing-schema"],
+)
+def test_main_exit_status_follows_the_results(
+    monkeypatch, tmp_path, mini_schema, capsys, documents, schema_name, code
+):
+    paths = dict(zip(("good", "bad"), _documents(tmp_path), strict=True))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "validate_schema.py",
+            *(str(paths[name]) for name in documents),
+            "--schema",
+            str(tmp_path / schema_name),
+        ],
+    )
+
+    assert vs.main() == code
+    if code == 1:
+        assert "INVALID  bad.xml" in capsys.readouterr().out
+
+
+def test_main_without_tei_points_to_step_five(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "RESULTS_TEI_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["validate_schema.py"])
+
+    assert vs.main() == 1
+
+
+def test_offline_path_produces_tei_valid_against_tei_all(
+    step4_dirs, step5_dirs, tei_all
+):
     """Fixture into data/processed/transcriptions/, then steps 4 and 5.
 
     This is the path a fork walks without any API key: a contract-conformant
     transcription file, deterministic validation, deterministic TEI. Its
-    output has to validate against the schema the template ships as default.
+    output has to validate against the TEI All schema the template ships.
     """
-    dirs = {
-        name: tmp_path / name
-        for name in ("transcriptions", "validated", "results_tei", "reports")
-    }
-    for path in dirs.values():
-        path.mkdir()
     shutil.copyfile(
-        FIXTURES / "transcription.json", dirs["transcriptions"] / "synthetic1.json"
+        FIXTURES / "transcription.json",
+        step4_dirs["transcriptions_dir"] / "synthetic1.json",
     )
 
-    step4.validate_one(
-        "synthetic1",
-        None,
-        force=True,
-        transcriptions_dir=dirs["transcriptions"],
-        validated_dir=dirs["validated"],
-    )
-    step5.annotate_one(
-        "synthetic1",
-        {},
-        validate_only=False,
-        force=True,
-        validated_dir=dirs["validated"],
-        tei_dir=dirs["results_tei"],
-        reports_dir=dirs["reports"],
-    )
+    step4.validate_one("synthetic1", None, force=True, **step4_dirs)
+    step5.annotate_one("synthetic1", {}, validate_only=False, force=True, **step5_dirs)
 
-    tei_path = dirs["results_tei"] / "synthetic1.xml"
-    assert json.loads(
-        (dirs["reports"] / "synthetic1_validation.json").read_text(encoding="utf-8")
-    )["well_formed"]
-
-    results = vs.validate_files(config.VALIDATION_SCHEMA, [tei_path])
-    assert results[0].valid, results[0].errors
+    report = read_json(step5_dirs["reports_dir"] / "synthetic1_validation.json")
+    assert report["well_formed"]
+    tei = etree.parse(str(step5_dirs["tei_dir"] / "synthetic1.xml"))
+    assert tei_all.validate(tei), tei_all.error_log

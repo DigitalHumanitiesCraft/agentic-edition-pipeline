@@ -7,44 +7,37 @@ variants stay valid against the shipped schema. A document that could not
 be processed has to reach the shell as a non-zero exit code.
 """
 
-import json
+import hashlib
+import importlib
 import sys
-from pathlib import Path
 
 import pytest
 from lxml import etree
 
-from conftest import load_step
+import config
+import contract
+from conftest import (
+    NS,
+    CasefoldCollidingDir,
+    page_images,
+    read_json,
+    reseal_validated,
+    review_event,
+    write_json,
+)
 
-step5 = load_step("05_annotate_tei")
-config = load_step("config")
-contract = load_step("contract")
-vs = load_step("validate_schema")
-
-NS = {"tei": "http://www.tei-c.org/ns/1.0"}
+step5 = importlib.import_module("05_annotate_tei")
 
 
-def _reseal_validation(data):
-    data["_meta"]["input_state_hash"] = contract.transcription_state_hash(data)
-
-
-def _dirs(tmp_path, data=None) -> dict:
-    dirs = {
-        "validated_dir": tmp_path / "validated",
-        "tei_dir": tmp_path / "results_tei",
-        "reports_dir": tmp_path / "reports",
-    }
-    for path in dirs.values():
-        path.mkdir()
-    if data is not None:
-        _write_input(dirs, data)
-    return dirs
+@pytest.fixture
+def dirs(step5_dirs, fixture_validated):
+    """step5_dirs holding the validated fixture as its input."""
+    _write_input(step5_dirs, fixture_validated)
+    return step5_dirs
 
 
 def _write_input(dirs, data):
-    (dirs["validated_dir"] / f"{data['object_id']}.json").write_text(
-        json.dumps(data, ensure_ascii=False), encoding="utf-8"
-    )
+    write_json(dirs["validated_dir"] / f"{data['object_id']}.json", data)
 
 
 def _annotate(dirs, project=None, validate_only=False, force=True):
@@ -54,32 +47,36 @@ def _annotate(dirs, project=None, validate_only=False, force=True):
     return etree.parse(str(dirs["tei_dir"] / "fixture1.xml"))
 
 
-def _assert_schema_valid(root):
-    schema = vs.load_schema(config.VALIDATION_SCHEMA)
+def _failure(dirs, force=True, object_id="fixture1") -> config.ItemFailure:
+    with pytest.raises(config.ItemFailure) as failure:
+        step5.annotate_one(object_id, {}, False, force, **dirs)
+    return failure.value
+
+
+def _report(dirs) -> dict:
+    return read_json(dirs["reports_dir"] / "fixture1_validation.json")
+
+
+def _assert_schema_valid(root, schema):
     assert schema.validate(root), schema.error_log
 
 
-def test_report_meta_documents_deterministic_generation(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
+def _regenerate(dirs, data):
+    reseal_validated(data)
+    _write_input(dirs, data)
 
+
+def test_report_meta_documents_deterministic_generation(dirs, fixture_validated):
     _annotate(dirs)
 
-    report = json.loads(
-        (dirs["reports_dir"] / "fixture1_validation.json").read_text(encoding="utf-8")
-    )
-    assert report["_meta"]["script"] == "05_annotate_tei.py"
-    assert report["_meta"]["pipeline_step"] == 5
-    assert "provider" not in report["_meta"]
-    assert "model" not in report["_meta"]
-    assert "prompt_template" not in report["_meta"]
-    assert report["_meta"]["validation_state_hash"] == contract.canonical_hash(
-        fixture_validated
-    )
+    meta = _report(dirs)["_meta"]
+    assert meta["script"] == "05_annotate_tei.py"
+    assert meta["pipeline_step"] == 5
+    assert not {"provider", "model", "prompt_template"} & set(meta)
+    assert meta["validation_state_hash"] == contract.canonical_hash(fixture_validated)
 
 
-def test_only_the_results_candidate_is_written(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
-
+def test_only_the_results_candidate_is_written(tmp_path, dirs):
     _annotate(dirs)
 
     written = sorted(
@@ -89,14 +86,12 @@ def test_only_the_results_candidate_is_written(tmp_path, fixture_validated):
     )
     assert written == [
         "reports/fixture1_validation.json",
-        "results_tei/fixture1.xml",
+        "tei/fixture1.xml",
         "validated/fixture1.json",
     ]
 
 
-def test_header_maps_object_date_and_repository(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
-
+def test_header_maps_object_date_and_repository(dirs):
     root = _annotate(dirs)
 
     date = root.find(".//tei:origDate", NS)
@@ -108,25 +103,23 @@ def test_header_maps_object_date_and_repository(tmp_path, fixture_validated):
     assert root.findtext(".//tei:idno[@type='object-id']", namespaces=NS) == "fixture1"
 
 
-def test_undeclared_language_omits_lang_usage(tmp_path, fixture_validated):
+def test_undeclared_language_omits_lang_usage(dirs, fixture_validated, tei_all):
     fixture_validated["metadata"]["title"] = ""
     fixture_validated["metadata"]["language"] = ""
-    _reseal_validation(fixture_validated)
-    dirs = _dirs(tmp_path, fixture_validated)
+    _regenerate(dirs, fixture_validated)
 
     root = _annotate(dirs)
 
     assert root.findtext(".//tei:titleStmt/tei:title", namespaces=NS) == "fixture1"
     assert root.find(".//tei:profileDesc", NS) is None
-    _assert_schema_valid(root)
+    _assert_schema_valid(root, tei_all)
 
 
 def test_project_language_applies_when_the_document_declares_none(
-    tmp_path, fixture_validated
+    dirs, fixture_validated
 ):
     del fixture_validated["metadata"]["language"]
-    _reseal_validation(fixture_validated)
-    dirs = _dirs(tmp_path, fixture_validated)
+    _regenerate(dirs, fixture_validated)
 
     root = _annotate(dirs, {"language": "la"})
 
@@ -135,19 +128,13 @@ def test_project_language_applies_when_the_document_declares_none(
     assert (language.get("ident"), language.text) == ("la", "la")
 
 
-def test_document_language_takes_precedence_over_the_project(
-    tmp_path, fixture_validated
-):
-    dirs = _dirs(tmp_path, fixture_validated)
-
+def test_document_language_takes_precedence_over_the_project(dirs):
     root = _annotate(dirs, {"language": "la"})
 
     assert root.find(".//tei:langUsage/tei:language", NS).get("ident") == "fr"
 
 
-def test_declared_publisher_and_licence_are_schema_valid(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
-
+def test_declared_publisher_and_licence_are_schema_valid(dirs, tei_all):
     root = _annotate(dirs, {"publisher": "Example Press", "license": "CC BY 4.0"})
 
     statement = root.find(".//tei:publicationStmt", NS)
@@ -155,12 +142,10 @@ def test_declared_publisher_and_licence_are_schema_valid(tmp_path, fixture_valid
     assert (
         statement.findtext("tei:availability/tei:licence", namespaces=NS) == "CC BY 4.0"
     )
-    _assert_schema_valid(root)
+    _assert_schema_valid(root, tei_all)
 
 
-def test_missing_publisher_is_stated_not_invented(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
-
+def test_missing_publisher_is_stated_not_invented(dirs, tei_all):
     root = _annotate(dirs, {"license": "CC BY 4.0"})
 
     statement = root.find(".//tei:publicationStmt", NS)
@@ -172,7 +157,7 @@ def test_missing_publisher_is_stated_not_invented(tmp_path, fixture_validated):
     assert "agentic-edition-pipeline" not in etree.tostring(
         statement, encoding="unicode"
     )
-    _assert_schema_valid(root)
+    _assert_schema_valid(root, tei_all)
 
 
 @pytest.mark.parametrize(
@@ -185,11 +170,10 @@ def test_missing_publisher_is_stated_not_invented(tmp_path, fixture_validated):
     ],
 )
 def test_header_only_normalizes_valid_tei_dates(
-    tmp_path, fixture_validated, date_value, expected_when
+    dirs, fixture_validated, date_value, expected_when, tei_all
 ):
     fixture_validated["metadata"]["date"] = date_value
-    _reseal_validation(fixture_validated)
-    dirs = _dirs(tmp_path, fixture_validated)
+    _regenerate(dirs, fixture_validated)
 
     root = _annotate(dirs)
 
@@ -197,72 +181,53 @@ def test_header_only_normalizes_valid_tei_dates(
     assert date is not None
     assert date.text == date_value
     assert date.get("when") == expected_when
-    _assert_schema_valid(root)
+    _assert_schema_valid(root, tei_all)
 
 
-def test_xml_illegal_metadata_is_rejected_before_generation(
-    tmp_path, fixture_validated
-):
+def test_xml_illegal_metadata_is_rejected_before_generation(dirs, fixture_validated):
     fixture_validated["metadata"]["signature"] = "A\x0b1"
-    _reseal_validation(fixture_validated)
-    dirs = _dirs(tmp_path, fixture_validated)
+    _regenerate(dirs, fixture_validated)
 
-    with pytest.raises(config.ItemFailure) as failure:
-        step5.annotate_one("fixture1", {}, False, True, **dirs)
+    failure = _failure(dirs)
 
-    assert failure.value.stage == "contract"
-    assert "metadata.signature" in failure.value.message
+    assert failure.stage == "contract"
+    assert "metadata.signature" in failure.message
     assert not (dirs["tei_dir"] / "fixture1.xml").exists()
 
 
-def test_validate_only_writes_the_report_but_no_tei(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
-
+def test_validate_only_writes_the_report_but_no_tei(dirs):
     step5.annotate_one("fixture1", {}, validate_only=True, force=False, **dirs)
 
     assert (dirs["reports_dir"] / "fixture1_validation.json").is_file()
     assert not (dirs["tei_dir"] / "fixture1.xml").exists()
 
 
-def test_nonforced_run_skips_only_identical_tei(
-    monkeypatch, tmp_path, fixture_validated
-):
-    dirs = _dirs(tmp_path, fixture_validated)
+# Overwrite guard
+
+
+def test_nonforced_run_leaves_identical_tei_untouched(dirs):
     tei_path = dirs["tei_dir"] / "fixture1.xml"
     _annotate(dirs)
     expected = tei_path.read_bytes()
-    writes = []
-    write_tei = step5._write_tei
-    monkeypatch.setattr(
-        step5,
-        "_write_tei",
-        lambda path, xml: (writes.append(path), write_tei(path, xml)),
-    )
+    before = tei_path.stat()
 
     _annotate(dirs, force=False)
-    assert writes == []
+
+    after = tei_path.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
     assert tei_path.read_bytes() == expected
 
 
-def _tei_digest(dirs) -> str:
-    report = dirs["reports_dir"] / "fixture1_validation.json"
-    return json.loads(report.read_text(encoding="utf-8"))["_meta"]["tei_sha256"]
-
-
-def test_report_records_the_digest_of_the_written_tei(tmp_path, fixture_validated):
-    import hashlib
-
-    dirs = _dirs(tmp_path, fixture_validated)
+def test_report_records_the_digest_of_the_written_tei(dirs):
     _annotate(dirs)
-    written = (dirs["tei_dir"] / "fixture1.xml").read_bytes()
+    digest = hashlib.sha256((dirs["tei_dir"] / "fixture1.xml").read_bytes()).hexdigest()
 
-    assert _tei_digest(dirs) == hashlib.sha256(written).hexdigest()
+    assert _report(dirs)["_meta"]["tei_sha256"] == digest
     step5.annotate_one("fixture1", {}, validate_only=True, force=False, **dirs)
-    assert _tei_digest(dirs) == hashlib.sha256(written).hexdigest()
+    assert _report(dirs)["_meta"]["tei_sha256"] == digest
 
 
-def test_nonforced_run_refuses_to_replace_an_edited_tei(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
+def test_nonforced_run_refuses_to_replace_an_edited_tei(dirs):
     tei_path = dirs["tei_dir"] / "fixture1.xml"
     _annotate(dirs)
     enriched = tei_path.read_text(encoding="utf-8").replace(
@@ -270,35 +235,24 @@ def test_nonforced_run_refuses_to_replace_an_edited_tei(tmp_path, fixture_valida
     )
     tei_path.write_text(enriched, encoding="utf-8")
 
-    with pytest.raises(config.ItemFailure) as failure:
-        step5.annotate_one("fixture1", {}, False, False, **dirs)
-
-    assert failure.value.stage == "write"
+    assert _failure(dirs, force=False).stage == "write"
     assert tei_path.read_text(encoding="utf-8") == enriched
-    with pytest.raises(config.ItemFailure):
-        step5.annotate_one("fixture1", {}, False, False, **dirs)
+    # The refused run must keep the guard armed for the next one.
+    assert _failure(dirs, force=False).stage == "write"
 
 
-def test_existing_tei_without_recorded_digest_is_refused(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
+def test_existing_tei_without_recorded_digest_is_refused(dirs):
     tei_path = dirs["tei_dir"] / "fixture1.xml"
     tei_path.write_text("<external/>", encoding="utf-8")
 
-    with pytest.raises(config.ItemFailure) as failure:
-        step5.annotate_one("fixture1", {}, False, False, **dirs)
-
-    assert failure.value.stage == "write"
+    assert _failure(dirs, force=False).stage == "write"
     assert tei_path.read_text(encoding="utf-8") == "<external/>"
 
 
-def test_nonforced_run_replaces_its_own_tei_when_inputs_change(
-    tmp_path, fixture_validated
-):
-    dirs = _dirs(tmp_path, fixture_validated)
+def test_nonforced_run_replaces_its_own_tei_when_inputs_change(dirs, fixture_validated):
     _annotate(dirs)
     fixture_validated["metadata"]["title"] = "Changed title"
-    _reseal_validation(fixture_validated)
-    _write_input(dirs, fixture_validated)
+    _regenerate(dirs, fixture_validated)
 
     root = _annotate(dirs, force=False)
 
@@ -307,8 +261,7 @@ def test_nonforced_run_replaces_its_own_tei_when_inputs_change(
     )
 
 
-def test_force_replaces_an_edited_tei(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
+def test_force_replaces_an_edited_tei(dirs):
     tei_path = dirs["tei_dir"] / "fixture1.xml"
     _annotate(dirs)
     expected = tei_path.read_bytes()
@@ -319,56 +272,36 @@ def test_force_replaces_an_edited_tei(tmp_path, fixture_validated):
     assert tei_path.read_bytes() == expected
 
 
-def test_unsafe_object_id_is_rejected_before_validated_path_use(tmp_path):
-    dirs = _dirs(tmp_path)
+# Input trust boundary
 
-    with pytest.raises(config.ItemFailure) as failure:
-        step5.annotate_one("../outside", {}, False, True, **dirs)
 
-    assert failure.value.stage == "contract"
+def test_unsafe_object_id_is_rejected_before_validated_path_use(tmp_path, step5_dirs):
+    failure = _failure(step5_dirs, object_id="../outside")
+
+    assert failure.stage == "contract"
     assert not (tmp_path / "outside.xml").exists()
 
 
-def test_validation_state_hash_binds_human_review_history(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
-    report_path = dirs["reports_dir"] / "fixture1_validation.json"
+def test_validation_state_hash_binds_human_review_history(dirs, fixture_validated):
     _annotate(dirs)
-    first = json.loads(report_path.read_text(encoding="utf-8"))["_meta"][
-        "validation_state_hash"
-    ]
+    first = _report(dirs)["_meta"]["validation_state_hash"]
 
     fixture_validated["pages"][0]["review"] = {
         "status": "in_review",
-        "history": [
-            {
-                "from_status": "machine_unreviewed",
-                "status": "in_review",
-                "actor": "editor@example.org",
-                "timestamp": "2026-08-27T10:00:00+02:00",
-            }
-        ],
+        "history": [review_event("machine_unreviewed", "in_review")],
     }
-    _reseal_validation(fixture_validated)
-    _write_input(dirs, fixture_validated)
-    _annotate(dirs)
-    second = json.loads(report_path.read_text(encoding="utf-8"))["_meta"][
-        "validation_state_hash"
-    ]
-
-    assert first != second
-
-
-def test_nonforced_run_blocks_unvalidated_input_changes(tmp_path, fixture_validated):
-    dirs = _dirs(tmp_path, fixture_validated)
+    _regenerate(dirs, fixture_validated)
     _annotate(dirs)
 
+    assert _report(dirs)["_meta"]["validation_state_hash"] != first
+
+
+def test_nonforced_run_blocks_unvalidated_input_changes(dirs, fixture_validated):
+    _annotate(dirs)
     fixture_validated["metadata"]["title"] = "Changed title"
     _write_input(dirs, fixture_validated)
 
-    with pytest.raises(config.ItemFailure) as failure:
-        step5.annotate_one("fixture1", {}, False, False, **dirs)
-
-    assert failure.value.stage == "contract"
+    assert _failure(dirs, force=False).stage == "contract"
     root = etree.parse(str(dirs["tei_dir"] / "fixture1.xml"))
     assert (
         root.findtext(".//tei:titleStmt/tei:title", namespaces=NS)
@@ -377,81 +310,61 @@ def test_nonforced_run_blocks_unvalidated_input_changes(tmp_path, fixture_valida
 
 
 def test_tei_generation_blocks_changed_transcription_facsimiles(
-    monkeypatch, tmp_path, fixture_validated
+    monkeypatch, tmp_path, dirs, fixture_validated
 ):
-    images = []
-    for page in range(1, 6):
-        image = tmp_path / f"fixture1_p{page:03d}.png"
-        image.write_bytes(f"original-{page}".encode())
-        images.append(image)
+    images = page_images(tmp_path / "sources", 5, "fixture1_p{page:03d}.png")
     state = config.source_image_state(images)
     fixture_validated["source_images"] = [image.name for image in images]
     fixture_validated["transcription_meta"]["source_images"] = state
     fixture_validated["transcription_meta"]["source_images_hash"] = (
         config.source_image_state_hash(state)
     )
-    _reseal_validation(fixture_validated)
-    dirs = _dirs(tmp_path, fixture_validated)
+    _regenerate(dirs, fixture_validated)
     monkeypatch.setattr(step5, "ordered_page_images", lambda *_args, **_kwargs: images)
     images[0].write_bytes(b"changed")
 
-    with pytest.raises(config.ItemFailure) as failure:
-        step5.annotate_one("fixture1", {}, False, True, **dirs)
-
-    assert failure.value.stage == "source_state"
+    assert _failure(dirs).stage == "source_state"
     assert not (dirs["tei_dir"] / "fixture1.xml").exists()
 
 
 # Command line and exit code
 
 
-def _prepare_main(monkeypatch, tmp_path, *arguments):
-    dirs = _dirs(tmp_path)
-    monkeypatch.setattr(step5, "VALIDATED_DIR", dirs["validated_dir"])
-    monkeypatch.setattr(step5, "RESULTS_TEI_DIR", dirs["tei_dir"])
-    monkeypatch.setattr(step5, "RESULTS_REPORTS_DIR", dirs["reports_dir"])
+def _prepare_main(monkeypatch, step5_dirs, *arguments):
+    monkeypatch.setattr(step5, "VALIDATED_DIR", step5_dirs["validated_dir"])
+    monkeypatch.setattr(step5, "RESULTS_TEI_DIR", step5_dirs["tei_dir"])
+    monkeypatch.setattr(step5, "RESULTS_REPORTS_DIR", step5_dirs["reports_dir"])
     monkeypatch.setattr(step5, "ensure_dirs", lambda: None)
     monkeypatch.setattr(step5, "project_info", lambda: {"title": "Projekt"})
     monkeypatch.setattr(sys, "argv", ["05_annotate_tei.py", *(arguments or ("--all",))])
-    return dirs
+    return step5_dirs
 
 
-def test_main_exits_nonzero_on_a_processing_error(monkeypatch, tmp_path):
-    dirs = _prepare_main(monkeypatch, tmp_path)
+def test_main_exits_nonzero_on_a_processing_error(monkeypatch, step5_dirs):
+    dirs = _prepare_main(monkeypatch, step5_dirs)
     (dirs["validated_dir"] / "broken.json").write_text("{ not json", encoding="utf-8")
 
     with pytest.raises(SystemExit) as exc:
         step5.main()
 
     assert exc.value.code == 1
-    errors = json.loads(
-        (dirs["reports_dir"] / "errors.json").read_text(encoding="utf-8")
-    )["errors"]
+    errors = read_json(dirs["reports_dir"] / "errors.json")["errors"]
     assert [(error["object_id"], error["stage"]) for error in errors] == [
         ("broken", "read")
     ]
 
 
-def test_main_returns_cleanly_when_every_object_succeeds(
-    monkeypatch, tmp_path, fixture_validated
-):
-    dirs = _prepare_main(monkeypatch, tmp_path)
-    _write_input(dirs, fixture_validated)
+def test_main_returns_cleanly_when_every_object_succeeds(monkeypatch, dirs):
+    _prepare_main(monkeypatch, dirs)
 
     step5.main()
 
     assert (dirs["tei_dir"] / "fixture1.xml").exists()
-    assert (
-        json.loads((dirs["reports_dir"] / "errors.json").read_text(encoding="utf-8"))[
-            "errors"
-        ]
-        == []
-    )
+    assert read_json(dirs["reports_dir"] / "errors.json")["errors"] == []
 
 
-def test_main_sample_combines_with_all(monkeypatch, tmp_path, fixture_validated):
-    dirs = _prepare_main(monkeypatch, tmp_path, "--all", "--sample", "1")
-    _write_input(dirs, fixture_validated)
+def test_main_sample_combines_with_all(monkeypatch, dirs):
+    _prepare_main(monkeypatch, dirs, "--all", "--sample", "1")
     (dirs["validated_dir"] / "zz-later.json").write_text("{ not json", encoding="utf-8")
 
     step5.main()
@@ -459,13 +372,9 @@ def test_main_sample_combines_with_all(monkeypatch, tmp_path, fixture_validated)
     assert (dirs["tei_dir"] / "fixture1.xml").exists()
 
 
-def test_main_rejects_casefold_collisions(monkeypatch, tmp_path):
-    class Inputs:
-        def glob(self, _pattern):
-            return [Path("Doc.json"), Path("doc.json")]
-
-    _prepare_main(monkeypatch, tmp_path)
-    monkeypatch.setattr(step5, "VALIDATED_DIR", Inputs())
+def test_main_rejects_casefold_collisions(monkeypatch, step5_dirs):
+    _prepare_main(monkeypatch, step5_dirs)
+    monkeypatch.setattr(step5, "VALIDATED_DIR", CasefoldCollidingDir(".json"))
 
     with pytest.raises(SystemExit) as exc:
         step5.main()

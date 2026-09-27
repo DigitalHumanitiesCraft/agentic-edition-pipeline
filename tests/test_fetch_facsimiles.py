@@ -1,17 +1,38 @@
 """Checks for the remote-facsimile entry point and its three URL sources."""
 
 import hashlib
-import json
 import sys
 from io import BytesIO
 
 import pytest
+import requests
 from PIL import Image
 
-from conftest import load_step
+import fetch_facsimiles as fetch
+from conftest import (
+    FakeResponse,
+    forbid,
+    install_session,
+    read_json,
+    write_image_manifest,
+    write_json,
+)
 
-fetch = load_step("fetch_facsimiles")
-config = load_step("config")
+P1 = "https://example.org/p1.png"
+
+
+def _image_bytes(image_format="PNG", size=(1, 1)) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", size, color="white").save(buffer, format=image_format)
+    return buffer.getvalue()
+
+
+PNG = _image_bytes()
+JPEG = _image_bytes("JPEG")
+
+
+def _image_response(content=PNG, content_type="image/png"):
+    return FakeResponse(content=content, headers={"content-type": content_type})
 
 
 @pytest.fixture(autouse=True)
@@ -20,327 +41,51 @@ def _no_real_waiting(monkeypatch):
     monkeypatch.setattr(fetch, "FETCH_BACKOFF_SECONDS", 0)
 
 
-def _png_bytes() -> bytes:
-    buffer = BytesIO()
-    Image.new("RGB", (1, 1), color="white").save(buffer, format="PNG")
-    return buffer.getvalue()
+@pytest.fixture
+def image_root(monkeypatch, tmp_path):
+    root = tmp_path / "images"
+    monkeypatch.setattr(fetch, "IMAGES_DIR", root)
+    return root
 
 
-def _jpeg_bytes() -> bytes:
-    buffer = BytesIO()
-    Image.new("RGB", (1, 1), color="white").save(buffer, format="JPEG")
-    return buffer.getvalue()
+def _existing_page(image_root, name, content, **manifest_page):
+    object_dir = image_root / "doc1"
+    object_dir.mkdir(parents=True, exist_ok=True)
+    image = object_dir / name
+    image.write_bytes(content)
+    if manifest_page:
+        write_image_manifest(object_dir, [{"filename": name, **manifest_page}])
+    return image
 
 
-class _Response:
-    status_code = 200
-
-    def __init__(self, content, content_type="image/png"):
-        self.content = content
-        self.headers = {"content-type": content_type}
-
-    def raise_for_status(self):
-        return None
-
-    def iter_content(self, chunk_size):
-        for start in range(0, len(self.content), chunk_size):
-            yield self.content[start : start + chunk_size]
-
-    def close(self):
-        return None
-
-
-def _session_returning(content, content_type="image/png"):
-    class Session:
-        def __init__(self):
-            self.headers = {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def get(self, *_args, **_kwargs):
-            return _Response(content, content_type)
-
-    return Session
+# URL sources
 
 
 def test_inventory_exposes_remote_facsimiles_before_transcription(tmp_path):
-    inventory = tmp_path / "inventory.json"
-    inventory.write_text(
-        json.dumps(
-            {
-                "documents": [
-                    {
-                        "id": "doc1",
-                        "metadata": {
-                            "image_urls": {
-                                "2": "https://example.org/p2.jpg",
-                                "1": "https://example.org/p1.jpg",
-                            },
+    inventory = write_json(
+        tmp_path / "inventory.json",
+        {
+            "documents": [
+                {
+                    "id": "doc1",
+                    "metadata": {
+                        "image_urls": {
+                            "2": "https://example.org/p2.jpg",
+                            "1": "https://example.org/p1.jpg",
                         },
                     },
-                    {"id": "local", "metadata": {}},
-                ],
-            }
-        ),
-        encoding="utf-8",
+                },
+                {"id": "local", "metadata": {}},
+            ],
+        },
     )
 
     assert fetch.objects_from_inventory(inventory) == [
         (
             "doc1",
-            [
-                (1, "https://example.org/p1.jpg"),
-                (2, "https://example.org/p2.jpg"),
-            ],
+            [(1, "https://example.org/p1.jpg"), (2, "https://example.org/p2.jpg")],
         ),
     ]
-
-
-def test_existing_page_is_skipped_before_any_http_request(monkeypatch, tmp_path):
-    image_root = tmp_path / "images"
-    object_dir = image_root / "doc1"
-    object_dir.mkdir(parents=True)
-    image = object_dir / "doc1_p001.png"
-    image.write_bytes(_png_bytes())
-    (object_dir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "pages": [
-                    {
-                        "page": 1,
-                        "filename": image.name,
-                        "image_url": "https://example.org/p1.jpg",
-                        "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-
-    class NoNetworkSession:
-        def __init__(self):
-            self.headers = {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def get(self, *_args, **_kwargs):
-            raise AssertionError("HTTP request should not run for an existing page")
-
-    monkeypatch.setattr(fetch.requests, "Session", NoNetworkSession)
-
-    errors = fetch.fetch_object(
-        "doc1", [(1, "https://example.org/p1.jpg")], force=False
-    )
-
-    assert errors == []
-
-    manifest = json.loads((object_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["pages"][0]["sha256"]
-
-
-def test_changed_remote_url_refetches_instead_of_misattributing_old_bytes(
-    monkeypatch, tmp_path
-):
-    image_root = tmp_path / "images"
-    object_dir = image_root / "doc1"
-    object_dir.mkdir(parents=True)
-    image = object_dir / "doc1_p001.jpg"
-    image.write_bytes(_jpeg_bytes())
-    (object_dir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "pages": [
-                    {
-                        "page": 1,
-                        "filename": image.name,
-                        "image_url": "https://example.org/old.jpg",
-                        "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-    monkeypatch.setattr(fetch.requests, "Session", _session_returning(_png_bytes()))
-
-    errors = fetch.fetch_object(
-        "doc1", [(1, "https://example.org/new.png")], force=False
-    )
-
-    assert errors == []
-    assert not image.exists()
-    manifest = json.loads((object_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["pages"][0]["image_url"] == "https://example.org/new.png"
-    assert manifest["pages"][0]["sha256"] == hashlib.sha256(_png_bytes()).hexdigest()
-
-
-def test_corrupt_existing_page_is_refetched_and_replaced(monkeypatch, tmp_path):
-    image_root = tmp_path / "images"
-    object_dir = image_root / "doc1"
-    object_dir.mkdir(parents=True)
-    corrupt = object_dir / "doc1_p001.jpg"
-    corrupt.write_bytes(b"not an image")
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-    monkeypatch.setattr(fetch.requests, "Session", _session_returning(_png_bytes()))
-
-    errors = fetch.fetch_object(
-        "doc1", [(1, "https://example.org/p1.png")], force=False
-    )
-
-    assert errors == []
-    assert not corrupt.exists()
-    assert (object_dir / "doc1_p001.png").read_bytes() == _png_bytes()
-
-
-def test_force_fetch_removes_old_suffix_and_orphaned_pages(monkeypatch, tmp_path):
-    image_root = tmp_path / "images"
-    object_dir = image_root / "doc1"
-    object_dir.mkdir(parents=True)
-    (object_dir / "doc1_p001.jpg").write_bytes(_jpeg_bytes())
-    (object_dir / "doc1_p002.jpg").write_bytes(_jpeg_bytes())
-    orphan = object_dir / "doc1_p003.jpg"
-    orphan.write_bytes(_jpeg_bytes())
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-    monkeypatch.setattr(fetch.requests, "Session", _session_returning(_png_bytes()))
-
-    errors = fetch.fetch_object(
-        "doc1",
-        [
-            (1, "https://example.org/p1.png"),
-            (2, "https://example.org/p2.png"),
-        ],
-        force=True,
-    )
-
-    assert errors == []
-    assert sorted(path.name for path in object_dir.glob("doc1_p*.*")) == [
-        "doc1_p001.png",
-        "doc1_p002.png",
-    ]
-    manifest = json.loads((object_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert [page["page"] for page in manifest["pages"]] == [1, 2]
-
-
-def test_unsafe_object_id_is_rejected_before_network_or_filesystem_use(
-    monkeypatch, tmp_path
-):
-    image_root = tmp_path / "images"
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-
-    class NoSession:
-        def __init__(self):
-            raise AssertionError("network session must not be created")
-
-    monkeypatch.setattr(fetch.requests, "Session", NoSession)
-
-    errors = fetch.fetch_object(
-        "../outside", [(1, "https://example.org/p1.png")], force=True
-    )
-
-    assert errors[0]["stage"] == "contract"
-    assert not (tmp_path / "outside").exists()
-
-
-def test_transient_remote_failure_is_retried(monkeypatch, tmp_path):
-    image_root = tmp_path / "images"
-    calls = []
-
-    class TransientResponse:
-        def __init__(self):
-            self.status_code = 429
-            self.headers = {"retry-after": "0"}
-
-        def raise_for_status(self):
-            raise fetch.requests.HTTPError("rate limited")
-
-        def close(self):
-            return None
-
-    class Session:
-        def __init__(self):
-            self.headers = {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def get(self, *_args, **_kwargs):
-            calls.append(1)
-            if len(calls) == 1:
-                return TransientResponse()
-            return _Response(_png_bytes())
-
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-    monkeypatch.setattr(fetch.requests, "Session", Session)
-
-    errors = fetch.fetch_object("doc1", [(1, "https://example.org/p1.png")], force=True)
-
-    assert errors == []
-    assert len(calls) == 2
-
-
-def test_nonobject_existing_manifest_is_treated_as_missing(monkeypatch, tmp_path):
-    image_root = tmp_path / "images"
-    object_dir = image_root / "doc1"
-    object_dir.mkdir(parents=True)
-    (object_dir / "manifest.json").write_text("[]", encoding="utf-8")
-    monkeypatch.setattr(fetch, "IMAGES_DIR", image_root)
-    monkeypatch.setattr(fetch.requests, "Session", _session_returning(_png_bytes()))
-
-    errors = fetch.fetch_object(
-        "doc1", [(1, "https://example.org/p1.png")], force=False
-    )
-
-    assert errors == []
-
-
-def test_inventory_fetch_rejects_casefold_collisions_before_writing(
-    monkeypatch, tmp_path
-):
-    inventory = tmp_path / "inventory.json"
-    inventory.write_text(
-        json.dumps(
-            {
-                "documents": [
-                    {
-                        "id": object_id,
-                        "metadata": {"image_urls": {"1": "https://example.org/p1.png"}},
-                    }
-                    for object_id in ("Doc", "doc")
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(fetch, "INVENTORY_PATH", inventory)
-
-    def should_not_run(*_args, **_kwargs):
-        raise AssertionError("colliding IDs must block before materialization")
-
-    monkeypatch.setattr(fetch, "fetch_object", should_not_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["fetch_facsimiles.py", "--all", "--from-manifest"],
-    )
-
-    with pytest.raises(SystemExit) as exc:
-        fetch.main()
-
-    assert exc.value.code == 1
 
 
 def test_urls_from_tei_bind_graphics_to_page_breaks(tmp_path):
@@ -390,10 +135,9 @@ def test_urls_from_tei_refuses_external_entities(tmp_path):
     ids=["mapping", "list"],
 )
 def test_urls_from_transcription_read_both_declaration_forms(tmp_path, image_urls):
-    path = tmp_path / "doc1.json"
-    path.write_text(
-        json.dumps({"object_id": "doc1", "metadata": {"image_urls": image_urls}}),
-        encoding="utf-8",
+    path = write_json(
+        tmp_path / "doc1.json",
+        {"object_id": "doc1", "metadata": {"image_urls": image_urls}},
     )
 
     assert fetch.urls_from_transcription(path) == [
@@ -402,75 +146,234 @@ def test_urls_from_transcription_read_both_declaration_forms(tmp_path, image_url
     ]
 
 
-def test_unreadable_tei_source_is_recorded_not_raised(monkeypatch, tmp_path, capsys):
-    tei_dir = tmp_path / "tei"
-    tei_dir.mkdir()
-    (tei_dir / "broken.xml").write_text("<TEI><unclosed>", encoding="utf-8")
-    monkeypatch.setattr(fetch, "RESULTS_TEI_DIR", tei_dir)
-    monkeypatch.setattr(fetch, "IMAGES_DIR", tmp_path / "images")
-    monkeypatch.setattr(sys, "argv", ["fetch_facsimiles.py", "--all"])
-
-    with pytest.raises(SystemExit) as exc:
-        fetch.main()
-
-    assert exc.value.code == 1
-    errors = json.loads((tmp_path / "images" / "errors.json").read_text("utf-8"))
-    assert errors["errors"][0]["stage"] == "read"
+# Materialization of one object
 
 
-def test_decompression_bomb_becomes_a_page_error(monkeypatch, tmp_path):
-    buffer = BytesIO()
-    Image.new("RGB", (10, 10), color="white").save(buffer, format="PNG")
-    monkeypatch.setattr(fetch.Image, "MAX_IMAGE_PIXELS", 10)
-    monkeypatch.setattr(fetch, "IMAGES_DIR", tmp_path / "images")
-    monkeypatch.setattr(
-        fetch.requests, "Session", _session_returning(buffer.getvalue())
+def test_existing_page_is_skipped_before_any_http_request(monkeypatch, image_root):
+    _existing_page(
+        image_root, "doc1_p001.png", PNG, image_url="https://example.org/p1.jpg"
+    )
+    session = install_session(monkeypatch)
+
+    errors = fetch.fetch_object("doc1", [(1, "https://example.org/p1.jpg")], False)
+
+    assert errors == []
+    assert session.calls == []
+    manifest = read_json(image_root / "doc1" / "manifest.json")
+    assert manifest["pages"][0]["sha256"] == hashlib.sha256(PNG).hexdigest()
+
+
+def test_changed_remote_url_refetches_instead_of_misattributing_old_bytes(
+    monkeypatch, image_root
+):
+    old = _existing_page(
+        image_root, "doc1_p001.jpg", JPEG, image_url="https://example.org/old.jpg"
+    )
+    install_session(monkeypatch, _image_response())
+
+    errors = fetch.fetch_object("doc1", [(1, P1)], force=False)
+
+    assert errors == []
+    assert not old.exists()
+    manifest = read_json(image_root / "doc1" / "manifest.json")
+    assert manifest["pages"][0]["image_url"] == P1
+    assert manifest["pages"][0]["sha256"] == hashlib.sha256(PNG).hexdigest()
+
+
+def test_corrupt_existing_page_is_refetched_and_replaced(monkeypatch, image_root):
+    corrupt = _existing_page(image_root, "doc1_p001.jpg", b"not an image")
+    install_session(monkeypatch, _image_response())
+
+    errors = fetch.fetch_object("doc1", [(1, P1)], force=False)
+
+    assert errors == []
+    assert not corrupt.exists()
+    assert (image_root / "doc1" / "doc1_p001.png").read_bytes() == PNG
+
+
+def test_force_fetch_removes_old_suffix_and_orphaned_pages(monkeypatch, image_root):
+    for name in ("doc1_p001.jpg", "doc1_p002.jpg", "doc1_p003.jpg"):
+        _existing_page(image_root, name, JPEG)
+    install_session(monkeypatch, _image_response())
+
+    errors = fetch.fetch_object(
+        "doc1", [(1, P1), (2, "https://example.org/p2.png")], force=True
     )
 
-    errors = fetch.fetch_object("doc1", [(1, "https://example.org/p1.png")], True)
+    assert errors == []
+    assert sorted(path.name for path in (image_root / "doc1").glob("doc1_p*.*")) == [
+        "doc1_p001.png",
+        "doc1_p002.png",
+    ]
+    manifest = read_json(image_root / "doc1" / "manifest.json")
+    assert [page["page"] for page in manifest["pages"]] == [1, 2]
+
+
+def test_nonobject_existing_manifest_is_treated_as_missing(monkeypatch, image_root):
+    (image_root / "doc1").mkdir(parents=True)
+    (image_root / "doc1" / "manifest.json").write_text("[]", encoding="utf-8")
+    install_session(monkeypatch, _image_response())
+
+    assert fetch.fetch_object("doc1", [(1, P1)], force=False) == []
+
+
+def test_unsafe_object_id_is_rejected_before_network_or_filesystem_use(
+    monkeypatch, tmp_path, image_root
+):
+    monkeypatch.setattr(
+        requests, "Session", forbid("network session must not be created")
+    )
+
+    errors = fetch.fetch_object("../outside", [(1, P1)], force=True)
+
+    assert errors[0]["stage"] == "contract"
+    assert not (tmp_path / "outside").exists()
+
+
+def test_transient_remote_failure_is_retried(monkeypatch, image_root):
+    session = install_session(
+        monkeypatch,
+        FakeResponse(status_code=429, headers={"retry-after": "0"}),
+        _image_response(),
+    )
+
+    errors = fetch.fetch_object("doc1", [(1, P1)], force=True)
+
+    assert errors == []
+    assert session.calls == [P1, P1]
+
+
+def test_permanent_http_error_is_not_retried(monkeypatch, image_root):
+    session = install_session(monkeypatch, FakeResponse(status_code=404))
+
+    errors = fetch.fetch_object("doc1", [(1, P1)], force=True)
+
+    assert errors[0]["stage"] == "fetch"
+    assert session.calls == [P1]
+
+
+def test_decompression_bomb_becomes_a_page_error(monkeypatch, image_root):
+    monkeypatch.setattr(fetch.Image, "MAX_IMAGE_PIXELS", 10)
+    install_session(monkeypatch, _image_response(_image_bytes(size=(10, 10))))
+
+    errors = fetch.fetch_object("doc1", [(1, P1)], True)
 
     assert errors[0]["stage"] == "fetch"
     assert "not a valid supported image" in errors[0]["error"]
 
 
-def test_oversized_response_is_refused_while_streaming(monkeypatch, tmp_path):
+def test_oversized_response_is_refused_while_streaming(monkeypatch, image_root):
     monkeypatch.setattr(fetch, "FETCH_MAX_BYTES", 10)
-    monkeypatch.setattr(fetch, "IMAGES_DIR", tmp_path / "images")
-    monkeypatch.setattr(fetch.requests, "Session", _session_returning(_png_bytes()))
+    install_session(monkeypatch, _image_response())
 
-    errors = fetch.fetch_object("doc1", [(1, "https://example.org/p1.png")], True)
+    errors = fetch.fetch_object("doc1", [(1, P1)], True)
 
     assert "exceeds the limit" in errors[0]["error"]
-    assert not list((tmp_path / "images" / "doc1").glob("*.png"))
+    assert not list((image_root / "doc1").glob("*.png"))
 
 
-def test_permanent_http_error_is_not_retried(monkeypatch, tmp_path):
-    calls = []
+def test_declared_content_type_must_match_the_image_bytes(monkeypatch, image_root):
+    install_session(monkeypatch, _image_response(PNG, "image/jpeg"))
 
-    class NotFound(_Response):
-        status_code = 404
+    errors = fetch.fetch_object("doc1", [(1, P1)], True)
 
-        def raise_for_status(self):
-            raise fetch.requests.HTTPError("404 Not Found")
+    assert "conflicts with content type" in errors[0]["error"]
 
-    class Session:
-        def __init__(self):
-            self.headers = {}
 
-        def __enter__(self):
-            return self
+# Command line
 
-        def __exit__(self, *_args):
-            return False
 
-        def get(self, *_args, **_kwargs):
-            calls.append(1)
-            return NotFound(b"")
+def _run_main(monkeypatch, *arguments):
+    monkeypatch.setattr(sys, "argv", ["fetch_facsimiles.py", *arguments])
+    fetch.main()
 
-    monkeypatch.setattr(fetch, "IMAGES_DIR", tmp_path / "images")
-    monkeypatch.setattr(fetch.requests, "Session", Session)
 
-    errors = fetch.fetch_object("doc1", [(1, "https://example.org/p1.png")], True)
+def test_main_materializes_every_inventory_object(
+    monkeypatch, tmp_path, image_root, capsys
+):
+    inventory = write_json(
+        tmp_path / "inventory.json",
+        {
+            "documents": [
+                {"id": "doc1", "metadata": {"image_urls": {"1": P1}}},
+                {
+                    "id": "doc2",
+                    "metadata": {"image_urls": ["https://example.org/q.png"]},
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(fetch, "INVENTORY_PATH", inventory)
+    session = install_session(monkeypatch, _image_response())
 
-    assert errors[0]["stage"] == "fetch"
-    assert calls == [1]
+    _run_main(monkeypatch, "--all", "--from-manifest")
+
+    assert session.calls == [P1, "https://example.org/q.png"]
+    assert read_json(image_root / "errors.json")["errors"] == []
+    for object_id in ("doc1", "doc2"):
+        pages = read_json(image_root / object_id / "manifest.json")["pages"]
+        assert pages[0]["filename"] == f"{object_id}_p001.png"
+    assert "2 object(s)" in capsys.readouterr().out
+
+
+def test_main_reads_urls_from_transcriptions(monkeypatch, tmp_path, image_root):
+    transcriptions = tmp_path / "transcriptions"
+    write_json(
+        transcriptions / "doc1.json",
+        {"object_id": "doc1", "metadata": {"image_urls": [P1]}},
+    )
+    write_json(transcriptions / "errors.json", {"errors": []})
+    monkeypatch.setattr(fetch, "TRANSCRIPTIONS_DIR", transcriptions)
+    install_session(monkeypatch, _image_response())
+
+    _run_main(monkeypatch, "--object", "doc1", "--from-transcriptions")
+
+    assert (image_root / "doc1" / "doc1_p001.png").read_bytes() == PNG
+
+
+def test_main_without_inventory_points_to_step_two(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(fetch, "INVENTORY_PATH", tmp_path / "absent.json")
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, "--all", "--from-manifest")
+
+    assert exc.value.code == 1
+    assert "02_analyze.py" in capsys.readouterr().err
+
+
+def test_inventory_fetch_rejects_casefold_collisions_before_writing(
+    monkeypatch, tmp_path
+):
+    inventory = write_json(
+        tmp_path / "inventory.json",
+        {
+            "documents": [
+                {"id": object_id, "metadata": {"image_urls": {"1": P1}}}
+                for object_id in ("Doc", "doc")
+            ]
+        },
+    )
+    monkeypatch.setattr(fetch, "INVENTORY_PATH", inventory)
+    monkeypatch.setattr(
+        fetch, "fetch_object", forbid("colliding IDs must block before materialization")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, "--all", "--from-manifest")
+
+    assert exc.value.code == 1
+
+
+def test_unreadable_tei_source_is_recorded_not_raised(
+    monkeypatch, tmp_path, image_root
+):
+    tei_dir = tmp_path / "tei"
+    tei_dir.mkdir()
+    (tei_dir / "broken.xml").write_text("<TEI><unclosed>", encoding="utf-8")
+    monkeypatch.setattr(fetch, "RESULTS_TEI_DIR", tei_dir)
+
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, "--all")
+
+    assert exc.value.code == 1
+    assert read_json(image_root / "errors.json")["errors"][0]["stage"] == "read"

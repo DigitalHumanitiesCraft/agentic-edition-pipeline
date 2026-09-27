@@ -2,79 +2,88 @@
 
 from pathlib import Path
 
-from conftest import load_step
+import pytest
 
-publication = load_step("check_publication")
-validate_schema = load_step("validate_schema")
+import check_publication as publication
+import config
+import validate_schema
+from conftest import minimal_tei
 
 
-def _tei(path: Path, status: str) -> None:
+@pytest.fixture(autouse=True)
+def repository(monkeypatch, tmp_path):
+    """Isolate the gate from the checkout's own review state and data."""
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(config, "RESULTS_TEI_DIR", tmp_path / "results/tei")
+    monkeypatch.setattr(
+        config, "TRANSCRIPTIONS_DIR", tmp_path / "data/processed/transcriptions"
+    )
+    # Schema validity has its own tests; here every candidate passes it.
+    monkeypatch.setattr(
+        validate_schema,
+        "validate_files",
+        lambda _schema, files: [
+            validate_schema.FileResult(path, True) for path in files
+        ],
+    )
+    return tmp_path
+
+
+def _tei(repository: Path, status: str) -> Path:
+    path = repository / "results/tei/doc1.xml"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<TEI xmlns="http://www.tei-c.org/ns/1.0">'
-        f'<teiHeader><revisionDesc status="{status}"/></teiHeader>'
-        "<text><body/></text></TEI>",
+        minimal_tei(revision_desc=f'<revisionDesc status="{status}"/>'),
         encoding="utf-8",
     )
+    return path
 
 
-def test_publication_requires_human_acceptance(monkeypatch, tmp_path):
-    candidate = tmp_path / "doc1.xml"
-    _tei(candidate, "human_verified")
-    monkeypatch.setattr(
-        publication.validate_schema,
-        "validate_files",
-        lambda _schema, files: [validate_schema.FileResult(files[0], True)],
-    )
+def test_publication_requires_human_acceptance(repository):
+    candidate = _tei(repository, "human_verified")
 
-    problems = publication.publication_problems([candidate], tmp_path / "schema.rng")
+    problems = publication.publication_problems([candidate], repository / "schema.rng")
 
     assert problems == [
         "doc1.xml has human review status human_verified; accepted required"
     ]
 
 
-def test_publication_accepts_schema_valid_accepted_tei(monkeypatch, tmp_path):
-    candidate = tmp_path / "doc1.xml"
-    _tei(candidate, "accepted")
-    monkeypatch.setattr(
-        publication.validate_schema,
-        "validate_files",
-        lambda _schema, files: [validate_schema.FileResult(files[0], True)],
+def test_publication_accepts_schema_valid_accepted_tei(repository):
+    candidate = _tei(repository, "accepted")
+
+    assert (
+        publication.publication_problems([candidate], repository / "schema.rng") == []
     )
 
-    assert publication.publication_problems([candidate], tmp_path / "schema.rng") == []
 
-
-def _main(monkeypatch, tmp_path, status: str | None) -> int:
-    tei_dir = tmp_path / "tei"
-    tei_dir.mkdir()
-    if status is not None:
-        _tei(tei_dir / "doc1.xml", status)
-    monkeypatch.setattr(publication.config, "RESULTS_TEI_DIR", tei_dir)
-    monkeypatch.setattr(publication.config, "PROJECT_ROOT", tmp_path)
+def test_schema_invalid_candidate_blocks_publication(monkeypatch, repository):
+    candidate = _tei(repository, "accepted")
     monkeypatch.setattr(
-        publication.validate_schema,
+        validate_schema,
         "validate_files",
-        lambda _schema, files: [
-            validate_schema.FileResult(path, True) for path in files
-        ],
+        lambda _schema, files: [validate_schema.FileResult(files[0], False)],
     )
-    return publication.main()
+
+    assert publication.publication_problems([candidate], Path("tei_all.rng")) == [
+        "doc1.xml is invalid against tei_all.rng"
+    ]
 
 
+@pytest.mark.parametrize(
+    ("status", "code", "stream", "message"),
+    [
+        ("accepted", 0, "out", "Publication gate passed"),
+        ("in_review", 1, "err", "accepted required"),
+        (None, 1, "err", "no TEI candidates"),
+    ],
+    ids=["accepted", "unaccepted", "empty"],
+)
 def test_main_exit_code_is_zero_only_for_an_accepted_candidate_set(
-    monkeypatch, tmp_path, capsys
+    repository, capsys, status, code, stream, message
 ):
-    assert _main(monkeypatch, tmp_path, "accepted") == 0
-    assert "Publication gate passed" in capsys.readouterr().out
+    if status is not None:
+        _tei(repository, status)
 
-
-def test_main_blocks_an_unaccepted_candidate(monkeypatch, tmp_path, capsys):
-    assert _main(monkeypatch, tmp_path, "in_review") == 1
-    assert "accepted required" in capsys.readouterr().err
-
-
-def test_main_blocks_an_empty_candidate_set(monkeypatch, tmp_path, capsys):
-    assert _main(monkeypatch, tmp_path, None) == 1
-    assert "no TEI candidates" in capsys.readouterr().err
+    assert publication.main() == code
+    assert message in getattr(capsys.readouterr(), stream)

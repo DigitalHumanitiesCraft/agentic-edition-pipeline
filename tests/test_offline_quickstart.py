@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
+from conftest import NS, render_frontend
+
 REPOSITORY_ROOT = Path(__file__).parent.parent
 RUNNER_PATH = REPOSITORY_ROOT / "examples" / "offline-quickstart" / "run.py"
 EXPECTED_IDS = ["example-letter-001", "example-note-002"]
@@ -27,6 +29,16 @@ OPERATOR_DOCUMENTS = (
     "SETUP.md",
     "reference/pipeline.md",
     "reference/evaluation.md",
+    "reference/data-contract.md",
+    "reference/tei-mapping.md",
+    "reference/local-review.md",
+    "reference/provider-records.md",
+    "knowledge/00_INDEX.md",
+    "knowledge/decisions.md",
+    "knowledge/journal.md",
+    "knowledge/handoff.md",
+    "knowledge/template/overview.md",
+    "knowledge/template/lineage.md",
 )
 
 spec = importlib.util.spec_from_file_location("offline_quickstart", RUNNER_PATH)
@@ -93,6 +105,9 @@ def _http_get(server: ThreadingHTTPServer, path: str) -> bytes:
 
 
 def _assert_operator_document_links(root: Path) -> None:
+    # Knowledge documents link each other by Obsidian wikilink, which
+    # resolves by file name anywhere below knowledge/.
+    knowledge_names = {path.stem for path in (root / "knowledge").rglob("*.md")}
     for name in OPERATOR_DOCUMENTS:
         path = root / name
         text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
@@ -101,6 +116,8 @@ def _assert_operator_document_links(root: Path) -> None:
                 continue
             linked = path.parent / target.split("#", 1)[0]
             assert linked.exists(), f"{name} links to missing {target}"
+        for target in re.findall(r"\[\[([^\]|#]+)", text):
+            assert target in knowledge_names, f"{name} links to missing [[{target}]]"
 
 
 def test_operator_document_links_resolve_in_repository() -> None:
@@ -153,7 +170,6 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
     assert all(item["has_images"] is False for item in catalog["objects"])
 
     catalog_by_id = {item["id"]: item for item in catalog["objects"]}
-    namespace = {"tei": "http://www.tei-c.org/ns/1.0"}
     for object_id in EXPECTED_IDS:
         fixture = _fixture(object_id)
         expected_metadata = fixture["metadata"]
@@ -167,15 +183,15 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
 
         tei_path = target / "results" / "tei" / f"{object_id}.xml"
         root = etree.parse(str(tei_path))
-        assert root.find(".//tei:body", namespace) is not None
+        assert root.find(".//tei:body", NS) is not None
         assert (
-            root.findtext(".//tei:publicationStmt/tei:publisher", namespaces=namespace)
+            root.findtext(".//tei:publicationStmt/tei:publisher", namespaces=NS)
             == "Digital Humanities Craft"
         )
-        assert root.findtext(".//tei:repository", namespaces=namespace) == (
+        assert root.findtext(".//tei:repository", namespaces=NS) == (
             "Synthetic example corpus"
         )
-        date = root.find(".//tei:origDate", namespace)
+        date = root.find(".//tei:origDate", NS)
         assert date is not None
         assert date.get("when") == expected_metadata["date"]
         assert "[TODO]" not in tei_path.read_text(encoding="utf-8")
@@ -204,6 +220,20 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
         assert catalog_item["date"] == expected_metadata["date"]
         assert catalog_item["language"] == expected_metadata["language"]
 
+    # The copied frontend renders the built catalog, filters it regardless of
+    # letter case and links the viewer to the TEI download served below.
+    titles = [catalog_by_id[object_id]["title"] for object_id in EXPECTED_IDS]
+    shown = render_frontend(
+        target / "docs" / "js" / "app.js",
+        target / "docs",
+        query=titles[1].upper(),
+        viewer=EXPECTED_IDS[0],
+    )
+    assert [row[0] for row in shown["rows"]] == titles
+    assert shown["visible"] == [titles[1]]
+    assert shown["title"] == titles[0]
+    download = next(link for link in shown["links"] if link["download"])
+
     handler = partial(_QuietHandler, directory=str(target / "docs"))
     with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -212,9 +242,10 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
             assert b"Offline Quickstart Edition" in _http_get(
                 server, "data/catalog.json"
             )
-            app_js = _http_get(server, "js/app.js").decode("utf-8")
-            assert 'a.href = "tei/" + encodeURIComponent(id) + ".xml"' in app_js
-            assert "r.textContent.toLowerCase().indexOf(q)" in app_js
+            assert (
+                _http_get(server, download["href"])
+                == (target / "results" / "tei" / f"{EXPECTED_IDS[0]}.xml").read_bytes()
+            )
             for object_id in EXPECTED_IDS:
                 downloaded = _http_get(server, f"tei/{object_id}.xml")
                 assert (
@@ -226,38 +257,82 @@ def test_offline_quickstart_builds_verified_frontend_in_fresh_process(
             thread.join(timeout=5)
 
 
-def test_force_rejects_external_foreign_directory(tmp_path: Path) -> None:
-    target = tmp_path / "foreign-directory"
-    target.mkdir()
-    protected = target / "keep.txt"
-    protected.write_text("foreign", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="non-empty unowned target"):
-        runner.build(target, force=True)
-
-    assert protected.read_text(encoding="utf-8") == "foreign"
-    assert not (target / runner.OWNERSHIP_SENTINEL).exists()
+def _files(target: Path) -> dict[Path, bytes]:
+    return {path: path.read_bytes() for path in target.rglob("*") if path.is_file()}
 
 
-def test_force_rejects_nonempty_unmarked_quickstart_shaped_target(
-    tmp_path: Path,
-) -> None:
-    target = tmp_path / "unmarked"
+def _sentinel(**changes):
+    """Write a runner sentinel whose payload differs by changes."""
+
+    def write(target: Path) -> None:
+        payload = runner._ownership_payload(target)
+        for field, value in changes.items():
+            if field in payload["_meta"]:
+                payload["_meta"][field] = value
+            else:
+                payload[field] = value
+        (target / runner.OWNERSHIP_SENTINEL).write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+
+    return write
+
+
+def _quickstart_shaped(target: Path) -> None:
     (target / "docs" / "data").mkdir(parents=True)
-    protected = target / "docs" / "data" / "catalog.json"
-    protected.write_text("{}", encoding="utf-8")
+    (target / "docs" / "data" / "catalog.json").write_text("{}", encoding="utf-8")
+
+
+UNOWNED_TARGETS = {
+    "foreign-directory": None,
+    "quickstart-shaped": _quickstart_shaped,
+    "foreign-owner": _sentinel(owner="foreign-owner"),
+    "future-version": _sentinel(sentinel_version=999),
+    "other-target": _sentinel(target="C:/different/target"),
+    "other-script": _sentinel(script="different-runner.py"),
+    "invalid-timestamp": _sentinel(timestamp="not-a-timestamp"),
+    "naive-timestamp": _sentinel(timestamp="2026-08-26T12:00:00"),
+}
+
+
+@pytest.mark.parametrize("canonical", [False, True], ids=["external", "canonical"])
+@pytest.mark.parametrize("operation", ["build", "clean"])
+@pytest.mark.parametrize(
+    "prepare", list(UNOWNED_TARGETS.values()), ids=list(UNOWNED_TARGETS)
+)
+def test_nonempty_unowned_target_is_never_replaced_or_removed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    prepare,
+    operation: str,
+    canonical: bool,
+) -> None:
+    target = tmp_path / ".aep-quickstart"
+    if canonical:
+        monkeypatch.setattr(runner, "DEFAULT_TARGET", target)
+    target.mkdir()
+    if prepare is not None:
+        prepare(target)
+    (target / "keep.txt").write_text("foreign", encoding="utf-8")
+    before = _files(target)
 
     with pytest.raises(ValueError, match="non-empty unowned target"):
-        runner.build(target, force=True)
+        if operation == "build":
+            runner.build(target, force=True)
+        else:
+            runner.clean(target)
 
-    assert protected.read_text(encoding="utf-8") == "{}"
+    assert _files(target) == before
 
 
-def test_force_replaces_marked_quickstart_target(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("canonical", [False, True], ids=["external", "canonical"])
+def test_force_replaces_a_marked_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, canonical: bool
 ) -> None:
     _stub_pipeline(monkeypatch)
-    target = tmp_path / "owned"
+    target = tmp_path / ".aep-quickstart"
+    if canonical:
+        monkeypatch.setattr(runner, "DEFAULT_TARGET", target)
     target.mkdir()
     runner._write_ownership_marker(target)
     old_file = target / "old-output.txt"
@@ -282,134 +357,21 @@ def test_clean_removes_only_a_runner_owned_target(tmp_path: Path) -> None:
     assert runner.clean(target) is False
 
 
-def test_clean_preserves_an_unowned_target(tmp_path: Path) -> None:
-    target = tmp_path / "foreign"
-    target.mkdir()
-    protected = target / "keep.txt"
-    protected.write_text("foreign", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="non-empty unowned target"):
-        runner.clean(target)
-
-    assert protected.read_text(encoding="utf-8") == "foreign"
-
-
-def test_force_rejects_canonical_default_without_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("through", ["link", "linked-parent"])
+def test_target_through_a_directory_link_is_refused(
+    tmp_path: Path, directory_link, through: str
 ) -> None:
-    target = tmp_path / ".aep-quickstart"
-    monkeypatch.setattr(runner, "DEFAULT_TARGET", target)
-    target.mkdir()
-    protected = target / "foreign-at-canonical-target.txt"
-    protected.write_text("must remain", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="non-empty unowned target"):
-        runner.build(target, force=True)
-
-    assert protected.read_text(encoding="utf-8") == "must remain"
-    assert not (target / runner.OWNERSHIP_SENTINEL).exists()
-
-
-def test_force_replaces_marked_canonical_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _stub_pipeline(monkeypatch)
-    target = tmp_path / ".aep-quickstart"
-    monkeypatch.setattr(runner, "DEFAULT_TARGET", target)
-    target.mkdir()
-    runner._write_ownership_marker(target)
-    old_file = target / "old-output.txt"
-    old_file.write_text("runner-owned", encoding="utf-8")
-
-    runner.build(target, force=True)
-
-    assert not old_file.exists()
-    assert runner._has_valid_ownership_marker(target)
-
-
-def test_target_reparse_check_runs_before_path_resolution(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    target = tmp_path / "linked-target"
-    reparse_component = tmp_path / "junction"
-    monkeypatch.setattr(
-        runner, "_find_reparse_component", lambda _target: reparse_component
-    )
-
-    def unexpected_resolve(_path: Path, *_args: object, **_kwargs: object) -> Path:
-        raise AssertionError("Path.resolve() must not run before the reparse check")
-
-    monkeypatch.setattr(runner.Path, "resolve", unexpected_resolve)
-
-    with pytest.raises(ValueError, match="symlink or reparse point"):
-        runner._validated_target(target)
-
-
-def test_target_validation_rejects_real_symbolic_link(tmp_path: Path) -> None:
     destination = tmp_path / "destination"
     destination.mkdir()
-    link = tmp_path / "linked-target"
-    try:
-        link.symlink_to(destination, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"symbolic links unavailable: {exc}")
+    link = directory_link(tmp_path / "linked", destination)
+    target = link if through == "link" else link / "quickstart"
 
     with pytest.raises(ValueError, match="symlink or reparse point"):
-        runner._validated_target(link)
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("owner", "foreign-owner"),
-        ("sentinel_version", 999),
-        ("target", "C:/different/target"),
-    ],
-)
-def test_force_rejects_manipulated_ownership_sentinel(
-    field: str, value: object, tmp_path: Path
-) -> None:
-    target = tmp_path / f"manipulated-{field}"
-    target.mkdir()
-    payload = runner._ownership_payload(target)
-    payload[field] = value
-    (target / runner.OWNERSHIP_SENTINEL).write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-    protected = target / "keep.txt"
-    protected.write_text("protected", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="non-empty unowned target"):
         runner.build(target, force=True)
+    with pytest.raises(ValueError, match="symlink or reparse point"):
+        runner.clean(target)
 
-    assert protected.read_text(encoding="utf-8") == "protected"
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("script", "different-runner.py"),
-        ("timestamp", "not-a-timestamp"),
-        ("timestamp", "2026-08-26T12:00:00"),
-    ],
-)
-def test_force_rejects_sentinel_with_manipulated_provenance(
-    field: str, value: str, tmp_path: Path
-) -> None:
-    target = tmp_path / f"manipulated-provenance-{field}-{len(value)}"
-    target.mkdir()
-    payload = runner._ownership_payload(target)
-    payload["_meta"][field] = value
-    (target / runner.OWNERSHIP_SENTINEL).write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-    protected = target / "keep.txt"
-    protected.write_text("protected", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="non-empty unowned target"):
-        runner.build(target, force=True)
-
-    assert protected.read_text(encoding="utf-8") == "protected"
+    assert list(destination.iterdir()) == []
 
 
 def test_existing_empty_external_target_is_safe(

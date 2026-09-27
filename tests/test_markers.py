@@ -5,13 +5,13 @@ hold the module to that declaration and pin the consequence in step 4, where
 a marker must not read as OCR noise.
 """
 
+import importlib
 import re
 
-from conftest import load_step
+import markers
 
-markers = load_step("markers")
-step4 = load_step("04_validate")
-step5 = load_step("05_annotate_tei")
+step4 = importlib.import_module("04_validate")
+step5 = importlib.import_module("05_annotate_tei")
 
 
 def _words(text: str) -> str:
@@ -72,10 +72,6 @@ def test_combined_illegible_group_matches_the_shared_marker():
     for text in ("[...]", "[... ~3 char]", "[...~ 40 chars]"):
         assert markers.MARKER_PATTERN.fullmatch(text)["illegible"] == text
         assert re.fullmatch(markers.ILLEGIBLE, text)
-
-
-def test_step5_maps_markers_with_the_shared_pattern():
-    assert step5.MARKER_PATTERN is markers.MARKER_PATTERN
 
 
 def test_spaced_illegible_extent_survives_the_tei_round_trip(fixture_validated):

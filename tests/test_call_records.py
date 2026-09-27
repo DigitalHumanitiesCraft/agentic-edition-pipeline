@@ -8,6 +8,7 @@ import pytest
 import config
 import llm
 from call_records import recording
+from conftest import FakeResponse, page_images, read_json
 
 step3 = importlib.import_module("03_transcribe")
 
@@ -30,18 +31,14 @@ def test_full_gemini_response_and_multipart_answer(tmp_path, monkeypatch):
         ],
     }
 
-    class Response:
-        status_code = 200
-
-        def json(self):
-            return payload
-
     monkeypatch.setattr(config, "GEMINI_API_KEY", "secret-fixture")
-    monkeypatch.setattr(llm, "_request_with_retry", lambda *a, **k: Response())
+    monkeypatch.setattr(
+        llm, "_request_with_retry", lambda *a, **k: FakeResponse(payload=payload)
+    )
     path = tmp_path / "record.json"
     with recording(path, {"prompt": "A secret-fixture"}) as record:
         record["answer"] = llm.call_llm("gemini", "mock", "Prompt")
-    result = json.loads(path.read_bytes())
+    result = read_json(path)
     assert result["answer"] == "onetwo"
     assert result["responses"][0]["body"] == payload
     assert "secret-fixture" not in path.read_text(encoding="utf-8")
@@ -51,13 +48,11 @@ def test_failed_call_is_recorded(tmp_path):
     path = tmp_path / "failure.json"
     with pytest.raises(RuntimeError), recording(path, {"model": "mock"}):
         raise RuntimeError("provider unavailable")
-    assert json.loads(path.read_bytes())["error"] == "provider unavailable"
+    assert read_json(path)["error"] == "provider unavailable"
 
 
 def test_resume_keeps_successful_chunk_and_invalidates_prompt(tmp_path, monkeypatch):
-    images = [tmp_path / f"page-{n}.png" for n in (1, 2)]
-    for image in images:
-        image.write_bytes(b"synthetic-image")
+    images = page_images(tmp_path / "sources", 2)
     monkeypatch.setattr(step3, "TRANSCRIPTIONS_DIR", tmp_path / "transcriptions")
     monkeypatch.setattr(step3, "find_images_for_document", lambda doc: images)
     calls = []
@@ -79,7 +74,7 @@ def test_resume_keeps_successful_chunk_and_invalidates_prompt(tmp_path, monkeypa
     fail_second = False
     assert step3.transcribe_document(*args) is None
     assert calls == [1, 2, 2]
-    data = json.loads((tmp_path / "transcriptions/synthetic.json").read_bytes())
+    data = read_json(tmp_path / "transcriptions/synthetic.json")
     assert not step3.contract.file_violations(data)
     assert len(list((tmp_path / "llm-calls/synthetic").glob("*.json"))) == 3
     assert step3.transcribe_document(*args[:-1], True) is None

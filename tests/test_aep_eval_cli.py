@@ -9,9 +9,7 @@ from pathlib import Path
 
 from aep_eval.__main__ import main
 from aep_eval.manifest import RESULT_SCHEMA, validate_against_schema
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
+from conftest import EVALUATION_FIXTURES as FIXTURES
 
 
 def _run(manifest: Path, out: Path, *extra: str) -> int:

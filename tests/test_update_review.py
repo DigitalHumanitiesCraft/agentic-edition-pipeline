@@ -1,11 +1,13 @@
 """Checks for explicit and auditable human review transitions."""
 
+import sys
+
 import pytest
 
-from conftest import load_step
-
-review = load_step("update_review")
-contract = load_step("contract")
+import contract
+import update_review as review
+from conftest import read_json, review_event, write_json
+from review_state import repository_writer
 
 
 def test_human_transition_records_actor_timestamp_and_previous_state(
@@ -23,13 +25,9 @@ def test_human_transition_records_actor_timestamp_and_previous_state(
     state = updated["pages"][0]["review"]
     assert state["status"] == "in_review"
     assert state["history"] == [
-        {
-            "from_status": "machine_unreviewed",
-            "status": "in_review",
-            "actor": "editor@example.org",
-            "timestamp": "2026-08-27T10:00:00+02:00",
-            "note": "Compared with the facsimile.",
-        }
+        review_event(
+            "machine_unreviewed", "in_review", note="Compared with the facsimile."
+        )
     ]
     assert contract.file_violations(updated) == []
     assert fixture_transcription["pages"][0]["review"]["status"] == "machine_unreviewed"
@@ -108,13 +106,8 @@ def test_agent_cannot_record_a_human_decision(fixture_transcription):
 
 
 def _cli(monkeypatch, tmp_path, fixture_transcription):
-    import json
-    import sys
-
     transcriptions = tmp_path / "data/processed/transcriptions"
-    transcriptions.mkdir(parents=True)
-    path = transcriptions / "fixture1.json"
-    path.write_text(json.dumps(fixture_transcription), encoding="utf-8")
+    path = write_json(transcriptions / "fixture1.json", fixture_transcription)
     monkeypatch.setattr(review, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(review, "TRANSCRIPTIONS_DIR", transcriptions)
     monkeypatch.setattr(
@@ -155,8 +148,6 @@ def test_cli_refuses_while_a_review_transaction_is_pending(
 def test_cli_refuses_while_another_writer_holds_the_repository(
     monkeypatch, tmp_path, capsys, fixture_transcription
 ):
-    from review_state import repository_writer
-
     path = _cli(monkeypatch, tmp_path, fixture_transcription)
     before = path.read_bytes()
 
@@ -169,12 +160,8 @@ def test_cli_refuses_while_another_writer_holds_the_repository(
 
 
 def test_cli_records_the_transition(monkeypatch, tmp_path, fixture_transcription):
-    import json
-
     path = _cli(monkeypatch, tmp_path, fixture_transcription)
 
     review.main()
 
-    assert json.loads(path.read_text(encoding="utf-8"))["pages"][0]["review"][
-        "status"
-    ] == ("in_review")
+    assert read_json(path)["pages"][0]["review"]["status"] == "in_review"

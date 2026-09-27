@@ -7,16 +7,14 @@ Levenshtein rate and the fidelity/scope decomposition.
 
 import json
 import re
-from pathlib import Path
 
 import pytest
 
 import markers
 from aep_eval import cer, profiles
 from aep_eval.manifest import FIXTURE_SCHEMA
+from conftest import EVALUATION_FIXTURES as FIXTURES
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
 HSA = profiles.get_profile("hsa-strict")
 ZBZ = profiles.get_profile("zbz-fidelity")
 

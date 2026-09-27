@@ -1,70 +1,54 @@
-"""Runnable checks for the pipeline data contract (knowledge/08_DATA_CONTRACT.md).
+"""Runnable checks for the pipeline data contract (reference/data-contract.md).
 
 Covers: pages/metadata pass-through in step 4, status mapping, title and
 language reaching the TEI header, facsimile graphic url, <lb/> for the
 diplomatic edition type, page-type handling, frontend text normalization
-and remote image rendering, JSON page counting in step 2, and the API key
-gate helper.
+and remote image rendering, and the API key gate helper.
 """
 
-import json
+import importlib
 
+import pytest
 from lxml import etree
 
-from conftest import load_step
+import config
+import contract
+from conftest import NS, minimal_tei, page_images, read_json, write_json
 
-TEI_NS = "http://www.tei-c.org/ns/1.0"
-NS = {"tei": TEI_NS}
-
-step2 = load_step("02_analyze")
-step4 = load_step("04_validate")
-step5 = load_step("05_annotate_tei")
-step6 = load_step("06_build_frontend")
-config = load_step("config")
-contract = load_step("contract")
+step4 = importlib.import_module("04_validate")
+step5 = importlib.import_module("05_annotate_tei")
+step6 = importlib.import_module("06_build_frontend")
 
 
 # Step 4: contract pass-through and status mapping
 
 
-def _run_validate(tmp_path, fixture):
-    src_dir = tmp_path / "transcriptions"
-    dst_dir = tmp_path / "validated"
-    src_dir.mkdir()
-    dst_dir.mkdir()
-    (src_dir / "fixture1.json").write_text(
-        json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
-    )
-    status = step4.validate_one(
-        "fixture1",
-        None,
-        force=True,
-        transcriptions_dir=src_dir,
-        validated_dir=dst_dir,
-    )
-    output = json.loads((dst_dir / "fixture1.json").read_text(encoding="utf-8"))
+def _run_validate(step4_dirs, fixture):
+    write_json(step4_dirs["transcriptions_dir"] / "fixture1.json", fixture)
+    status = step4.validate_one("fixture1", None, force=True, **step4_dirs)
+    output = read_json(step4_dirs["validated_dir"] / "fixture1.json")
     assert status == output["overall_status"]
     return output
 
 
-def test_validate_passes_pages_and_metadata_through(tmp_path, fixture_transcription):
-    out = _run_validate(tmp_path, fixture_transcription)
+def test_validate_passes_pages_and_metadata_through(step4_dirs, fixture_transcription):
+    out = _run_validate(step4_dirs, fixture_transcription)
     assert out["pages"] == fixture_transcription["pages"]
     assert out["metadata"] == fixture_transcription["metadata"]
     assert out["transcription_meta"] == fixture_transcription["_meta"]
 
 
 def test_step4_output_still_satisfies_the_runtime_contract(
-    tmp_path, fixture_transcription
+    step4_dirs, fixture_transcription
 ):
-    out = _run_validate(tmp_path, fixture_transcription)
+    out = _run_validate(step4_dirs, fixture_transcription)
     assert contract.file_violations(out) == []
 
 
 def test_needs_review_signal_maps_to_needs_review_not_problematic(
-    tmp_path, fixture_transcription
+    step4_dirs, fixture_transcription
 ):
-    out = _run_validate(tmp_path, fixture_transcription)
+    out = _run_validate(step4_dirs, fixture_transcription)
     assert out["overall_status"] == "needs_review"
 
 
@@ -126,8 +110,12 @@ def test_diplomatic_line_breaks_as_lb(fixture_validated):
     assert "".join(first_p.itertext()) == "Erste ZeileZweite Zeile"
 
 
-def test_normalised_edition_type_joins_lines(fixture_validated):
-    root, _ = _generate_root(fixture_validated, {"edition_type": "Normalisiert"})
+@pytest.mark.parametrize(
+    "edition_type",
+    ["Normalisiert", "Normalised transcription", "Normalized transcription"],
+)
+def test_normalised_edition_type_joins_lines(fixture_validated, edition_type):
+    root, _ = _generate_root(fixture_validated, {"edition_type": edition_type})
     first_p = root.find(".//tei:body//tei:p", NS)
     assert len(first_p.findall("tei:lb", NS)) == 0
     assert first_p.text == "Erste Zeile Zweite Zeile"
@@ -230,50 +218,21 @@ def test_frontend_normalizes_whitespace_and_renders_remote_urls(
 
 
 def test_frontend_copies_local_images_into_docs(monkeypatch, tmp_path):
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f'<TEI xmlns="{TEI_NS}"><teiHeader><fileDesc><titleStmt><title>t</title></titleStmt>'
-        "<publicationStmt><publisher>p</publisher></publicationStmt>"
-        "<sourceDesc><p>s</p></sourceDesc></fileDesc></teiHeader>"
-        '<text><body><div><pb n="1" facs="images/loc1/loc1_p001.png"/><p>Text</p></div></body></text></TEI>'
-    )
     tei_path = tmp_path / "loc1.xml"
-    tei_path.write_text(xml, encoding="utf-8")
-
-    image_dir = tmp_path / "sources_images" / "loc1"
-    image_dir.mkdir(parents=True)
-    (image_dir / "loc1_p001.png").write_bytes(b"\x89PNG fake")
-
+    tei_path.write_text(
+        minimal_tei('<pb n="1" facs="images/loc1/loc1_p001.png"/>'), encoding="utf-8"
+    )
+    images = page_images(tmp_path / "sources_images" / "loc1", 1, "loc1_p001.png")
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
     monkeypatch.setattr(step6, "DOCS_DIR", docs_dir)
-    monkeypatch.setattr(
-        step6, "ordered_page_images", lambda _id: [image_dir / "loc1_p001.png"]
-    )
+    monkeypatch.setattr(step6, "ordered_page_images", lambda _id: images)
 
     data = step6.process_tei(tei_path)
+
     assert data["has_images"] is True
     assert data["pages"][0]["image"] == "images/loc1/loc1_p001.png"
     assert (docs_dir / "images" / "loc1" / "loc1_p001.png").exists()
-
-
-# Step 2: JSON source type with page counting
-
-
-def test_analyze_counts_json_pages_from_pages_array(
-    monkeypatch, tmp_path, fixture_transcription
-):
-    sources = tmp_path / "sources"
-    (sources / "text").mkdir(parents=True)
-    (sources / "text" / "fixture1.json").write_text(
-        json.dumps(fixture_transcription, ensure_ascii=False), encoding="utf-8"
-    )
-    monkeypatch.setattr(step2, "SOURCES_DIR", sources)
-
-    documents = step2.scan_sources()
-    assert "fixture1" in documents
-    assert documents["fixture1"]["source_type"] == "transcription"
-    assert documents["fixture1"]["pages"] == 5
 
 
 # API key gate

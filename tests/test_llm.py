@@ -7,40 +7,36 @@ deterministic JSON repair of model output. Synthetic payloads stand in for
 provider responses, because the tests must not call a provider.
 """
 
+import os
+import socket
+
 import pytest
 import requests
 
-from conftest import load_step
-
-config = load_step("config")
-llm = load_step("llm")
+import config
+import llm
+from conftest import API_KEY_NAMES, FakeResponse, NetworkBlocked
 
 SECRET = "AIzaTESTKEY0123456789"
 
 
-class _FakeResponse:
-    """Minimal stand-in for requests.Response: status, payload, failure mode."""
-
-    def __init__(
-        self,
-        status_code: int = 200,
-        payload: dict | None = None,
-        error=None,
-        headers: dict | None = None,
+def test_the_suite_cannot_reach_a_provider_or_an_external_host():
+    for name in API_KEY_NAMES:
+        assert getattr(config, name) == ""
+        assert name not in os.environ
+    with pytest.raises(NetworkBlocked):
+        socket.create_connection(("192.0.2.1", 443), timeout=1)
+    with pytest.raises(NetworkBlocked):
+        requests.get("https://192.0.2.1/", timeout=1)
+    with pytest.raises(NetworkBlocked):
+        socket.getaddrinfo("generativelanguage.googleapis.com", 443)
+    with pytest.raises(NetworkBlocked):
+        llm.call_llm("ollama", "m", "prompt")
+    with (
+        socket.create_server(("127.0.0.1", 0)) as server,
+        socket.create_connection(server.getsockname(), timeout=1),
     ):
-        self.status_code = status_code
-        self._payload = payload or {}
-        self._error = error
-        self.headers = headers or {}
-
-    def json(self) -> dict:
-        return self._payload
-
-    def raise_for_status(self) -> None:
-        if self._error:
-            raise self._error
-        if self.status_code >= 400:
-            raise requests.exceptions.HTTPError(f"{self.status_code} Error")
+        pass
 
 
 def _all_keys(monkeypatch) -> None:
@@ -90,7 +86,7 @@ def test_request_shape_per_provider(
 
     def fake_request(method, request_url, **kwargs):
         captured.update(method=method, url=request_url, **kwargs)
-        return _FakeResponse(payload=ANSWERS[provider])
+        return FakeResponse(payload=ANSWERS[provider])
 
     _all_keys(monkeypatch)
     monkeypatch.setattr(llm, "_request_with_retry", fake_request)
@@ -157,7 +153,7 @@ def test_unknown_provider_is_rejected():
 def test_truncated_answer_raises_a_distinct_error(monkeypatch, provider, payload):
     _all_keys(monkeypatch)
     monkeypatch.setattr(
-        llm, "_request_with_retry", lambda *a, **k: _FakeResponse(payload=payload)
+        llm, "_request_with_retry", lambda *a, **k: FakeResponse(payload=payload)
     )
 
     with pytest.raises(llm.TruncatedResponseError, match=provider.capitalize()[:4]):
@@ -184,11 +180,11 @@ def test_transient_failures_are_retried_with_backoff_and_retry_after(monkeypatch
     sleeps = _scripted_requests(
         monkeypatch,
         [
-            _FakeResponse(status_code=429, headers={"Retry-After": "30"}),
-            _FakeResponse(status_code=503),
+            FakeResponse(status_code=429, headers={"Retry-After": "30"}),
+            FakeResponse(status_code=503),
             requests.exceptions.ConnectionError("reset"),
             requests.exceptions.Timeout("slow"),
-            _FakeResponse(payload={"ok": True}),
+            FakeResponse(payload={"ok": True}),
         ],
     )
 
@@ -203,8 +199,8 @@ def test_retry_after_is_capped(monkeypatch):
     sleeps = _scripted_requests(
         monkeypatch,
         [
-            _FakeResponse(status_code=429, headers={"Retry-After": "86400"}),
-            _FakeResponse(payload={}),
+            FakeResponse(status_code=429, headers={"Retry-After": "86400"}),
+            FakeResponse(payload={}),
         ],
     )
 
@@ -214,7 +210,7 @@ def test_retry_after_is_capped(monkeypatch):
 
 
 def test_client_errors_are_not_retried(monkeypatch):
-    sleeps = _scripted_requests(monkeypatch, [_FakeResponse(status_code=400)])
+    sleeps = _scripted_requests(monkeypatch, [FakeResponse(status_code=400)])
 
     with pytest.raises(RuntimeError, match="400"):
         llm._request_with_retry("POST", "https://host/api")
@@ -225,7 +221,7 @@ def test_client_errors_are_not_retried(monkeypatch):
 def test_retries_are_bounded(monkeypatch):
     sleeps = _scripted_requests(
         monkeypatch,
-        [_FakeResponse(status_code=500)] * (llm.MAX_RETRIES + 1),
+        [FakeResponse(status_code=500)] * (llm.MAX_RETRIES + 1),
     )
 
     with pytest.raises(RuntimeError, match="500"):
@@ -273,7 +269,7 @@ def test_http_error_from_provider_is_reraised_without_the_key(monkeypatch):
     monkeypatch.setattr(
         llm.requests,
         "request",
-        lambda *a, **k: _FakeResponse(status_code=401, error=error),
+        lambda *a, **k: FakeResponse(status_code=401, error=error),
     )
 
     with pytest.raises(RuntimeError) as exc:

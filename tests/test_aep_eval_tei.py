@@ -1,13 +1,10 @@
 """Synthetic checks for the RelaxNG conformance check."""
 
-from pathlib import Path
-
 import pytest
 
 from aep_eval import tei_check
+from conftest import EVALUATION_FIXTURES as FIXTURES
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
 MINI = FIXTURES / "mini.rng"
 
 

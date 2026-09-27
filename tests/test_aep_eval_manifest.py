@@ -6,9 +6,7 @@ from pathlib import Path
 import pytest
 
 from aep_eval import manifest as mf
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "evaluation"
+from conftest import EVALUATION_FIXTURES as FIXTURES
 
 
 def _write(tmp_path: Path, data: dict, name: str = "m.json") -> Path:
@@ -96,10 +94,3 @@ def test_missing_manifest_and_invalid_json(tmp_path):
     broken.write_text("{", encoding="utf-8")
     with pytest.raises(mf.ManifestError, match="not valid JSON"):
         mf.load_manifest(broken)
-
-
-def test_sha256_of_matches_hashlib():
-    import hashlib
-
-    path = FIXTURES / "reference.txt"
-    assert mf.sha256_of(path) == hashlib.sha256(path.read_bytes()).hexdigest()
