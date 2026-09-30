@@ -10,7 +10,7 @@ method:
   url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
 status: complete
 created: 2026-04-03
-updated: 2026-09-27
+updated: 2026-09-30
 ---
 
 # Knowledge index
@@ -52,7 +52,7 @@ These documents under `knowledge/template/` describe the reusable template and i
 
 | Document | Content |
 |---|---|
-| [[overview]] | Purpose, reuse, implemented scope and open requirements of the template |
+| [[overview]] | Purpose, conceptual basis, reuse, implemented scope and open requirements of the template |
 | [[lineage]] | Edition cases, technical sources, test artefacts and the case comparison behind the shared core |
 
 ### Records
@@ -87,6 +87,8 @@ The script names carry the numbers of the processing steps. They are independent
 ## Terms
 
 German project terms appear where a script, a proper name or a quoted project vocabulary requires them.
+
+The [conceptual basis](template/overview.md#conceptual-basis) defines the agent-supported edition workflow and the epistemic infrastructure of the edition project.
 
 ### Edition configuration
 

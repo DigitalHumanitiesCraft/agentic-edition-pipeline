@@ -4,6 +4,8 @@
 
 A forkable repository template for digital edition workflows operated with an AI harness, the working environment in which an agent reads the repository, runs tools and changes files. The template combines a knowledge base for the edition's decisions with Python scripts, prompts and data contracts for image transcription, quality assessment, TEI-XML generation, local correction and static publication.
 
+The [conceptual basis](knowledge/template/overview.md#conceptual-basis) defines an agent-supported edition workflow and the epistemic infrastructure of the edition project, including human responsibility for scholarly and technical review.
+
 The deterministic workflow and the local correction service have automated tests. Transcription quality, project-specific annotations and scholarly acceptance need evidence from the individual edition, as described in the [evaluation reference](reference/evaluation.md).
 
 ## Quickstart

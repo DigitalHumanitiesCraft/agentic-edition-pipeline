@@ -10,7 +10,7 @@ method:
   url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
 status: active
 created: 2026-04-03
-updated: 2026-09-27
+updated: 2026-09-30
 ---
 
 # Journal
@@ -329,3 +329,15 @@ At the end of the session `uv run ruff check .`, `uv run ruff format --check .` 
 - The Language value of `01_PROJECT.md` and the `language` of document metadata become `langUsage/language/@ident` unchecked. Whether the scripts validate BCP 47 codes is an operator decision.
 - Existing forks meet three one-time consequences. The changed transcription prompt makes earlier step-3 outputs stale, so a rerun needs `--force`. Step 5 refuses to replace TEI written before the recorded digest existed until one `--force` run. Processed image manifests without a SHA-256 per page must be regenerated.
 - `update_review.py` cannot tell whether a person or an agent runs it, so the rule that agents never record `human_verified` or `accepted` stays a behavioural rule on the command line.
+
+### 2026-09-30 Integrate the editorial workflow definitions
+
+#### Goal
+
+Integrate the definitions of the agent-supported edition workflow and the epistemic infrastructure of the edition project agreed with the operator.
+
+#### Result
+
+The English definitions are maintained in the [conceptual basis](template/overview.md#conceptual-basis). The README and [[00_INDEX]] link there. The project-specific use of epistemic infrastructure is distinguished from the general concept, which also applies without AI agents, and its design requirements are distinguished from the supplied implementation.
+
+The existing operator-document link test passed. The new section anchors, the documentation diff and the prose style were checked. No code or processing configuration changed.

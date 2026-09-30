@@ -10,12 +10,24 @@ method:
   url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
 status: complete
 created: 2026-09-08
-updated: 2026-09-27
+updated: 2026-09-30
 ---
 
 # Template overview
 
 The repository is a reusable template for digital edition workflows run in an AI harness. It connects maintained project knowledge with processing scripts, prompts and data contracts, and an agent uses this context to configure and adapt an edition. The template is a research preview without a stable release. `pyproject.toml` and `CITATION.cff` carry the current version.
+
+## Conceptual basis
+
+### Agent-supported edition workflow
+
+An agent-supported edition workflow is an editorial workflow in which AI agents based on Large Language Models (LLMs) plan work steps, use tools and adapt their approach to intermediate results on the basis of project-specific knowledge and editorial rules. People define the goals and the agents' scope of action and take responsibility for scholarly and technical review.
+
+### Epistemic infrastructure of the edition project
+
+The epistemic infrastructure of the edition project is a working environment jointly shaped by editors, developers and other contributors, in which people work with AI agents to produce, examine and revise scholarly results. It connects sources, research data, documented project knowledge, tools and review procedures. Human responsibilities, provenance, justification, review status and uncertainties remain traceable.
+
+Epistemic infrastructure as a general concept also applies to research environments without AI agents. The definition here specifies its use in an edition project with agent-supported work. It sets a design requirement for that project's working environment. The supplied processing path and correction service implement parts of this requirement, with the implemented scope and open requirements described below. The [evaluation reference](../../reference/evaluation.md) distinguishes formal checks, recognition quality and scholarly acceptance and states the evidence each needs.
 
 ## Reuse
 
