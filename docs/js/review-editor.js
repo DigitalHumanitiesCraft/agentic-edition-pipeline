@@ -40,14 +40,23 @@ window.addEventListener("beforeunload", event => {
   }
 });
 
+// A loopback host alone does not mean the review server: the documented static
+// previews (http.server, step 6 --serve) also bind 127.0.0.1 and have no API.
+let reviewService = null;
+function reviewServiceAvailable() {
+  reviewService ??= fetch("index.html", {cache: "no-store"})
+    .then(response => response.headers.get("X-Review-Service") === "local", () => false);
+  return reviewService;
+}
+
 export async function mountReview(host, object, pageIndex, onSaved) {
   unmountReview();
-  const local = ["127.0.0.1", "localhost"].includes(location.hostname);
   const workflow = object.workflow;
-  if (!local && !workflow?.changes.length) return;
   const abort = new AbortController();
   cleanup = () => abort.abort();
   const alive = () => !abort.signal.aborted && host.isConnected;
+  const local = ["127.0.0.1", "localhost"].includes(location.hostname) && await reviewServiceAvailable();
+  if (!alive() || (!local && !workflow?.changes.length)) return;
   const section = element("section", undefined, host, "review-panel");
   element("h3", "Bearbeitungsstand", section);
   if (workflow?.changes.length) {

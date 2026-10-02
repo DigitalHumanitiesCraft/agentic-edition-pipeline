@@ -634,3 +634,10 @@ def test_responses_carry_the_page_content_security_policy(running_server) -> Non
     meta = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', page)
     assert meta is not None
     assert policy == meta.group(1) + "; frame-ancestors 'none'"
+
+
+def test_static_responses_identify_the_review_service(running_server) -> None:
+    # docs/js/review-editor.js calls the API only when this header is present.
+    headers = _request(running_server, "GET", "/index.html")[2]
+
+    assert headers["X-Review-Service"] == "local"

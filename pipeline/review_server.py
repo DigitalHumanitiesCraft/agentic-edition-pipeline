@@ -430,6 +430,9 @@ class ReviewHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
+        # The static previews also run on 127.0.0.1 but have no API; the
+        # browser editor looks for this header before calling one.
+        self.send_header("X-Review-Service", "local")
         super().end_headers()
 
     def _json(self, status: int, data: dict) -> None:
