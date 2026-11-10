@@ -355,3 +355,13 @@ Bring the local clone to the remote state and check instructions and knowledge a
 #### Next steps
 
 The two operator decisions of 27 September 2026 are still open: how annotations bind in the Pages job, and whether the scripts validate BCP 47 language codes.
+
+### 2026-11-10 State the research-preview limits in the README
+
+#### Goal
+
+Follow the operator's request that every repository shown with the research tools says in the first paragraph of its README that it is an experiment, what it is, what it is not and where feedback belongs.
+
+#### Result
+
+The opening note of the README keeps "Research preview" with the version and now adds that the template is a research prototype developed with coding agents, that it is no finished or supported product, that its results need checking before reuse and that feedback belongs in the repository issues. The offline quickstart tests passed. No code, configuration or other document changed.

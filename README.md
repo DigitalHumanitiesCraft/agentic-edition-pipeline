@@ -1,6 +1,6 @@
 # Agentic Edition Pipeline
 
-> Research preview, version 0.10.0. The template is under active development and has no stable release yet.
+> Research preview, version 0.10.0. The Agentic Edition Pipeline is a research prototype developed with coding agents. It is a repository template for digital edition workflows that an AI harness operates. The template is under active development and has no stable release yet. It is not a finished or supported product, and its results need checking before any reuse. Feedback belongs in the [issues of the repository](https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/issues).
 
 A forkable repository template for digital edition workflows operated with an AI harness, the working environment in which an agent reads the repository, runs tools and changes files. The template combines a knowledge base for the edition's decisions with Python scripts, prompts and data contracts for image transcription, quality assessment, TEI-XML generation, local correction and static publication.
 
