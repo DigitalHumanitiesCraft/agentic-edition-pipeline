@@ -341,3 +341,17 @@ Integrate the definitions of the agent-supported edition workflow and the episte
 The English definitions are maintained in the [conceptual basis](template/overview.md#conceptual-basis). The README and [[00_INDEX]] link there. The project-specific use of epistemic infrastructure is distinguished from the general concept, which also applies without AI agents, and its design requirements are distinguished from the supplied implementation.
 
 The existing operator-document link test passed. The new section anchors, the documentation diff and the prose style were checked. No code or processing configuration changed.
+
+### 2026-11-10 Repository maintenance
+
+#### Goal
+
+Bring the local clone to the remote state and check instructions and knowledge against code and Git.
+
+#### Result
+
+`main` was fast-forwarded to `origin/main`, which added `d29e2e2` (certifi 2026.10.23 in `uv.lock`). Since the entry of 30 September 2026 two commits changed the repository without a journal entry: `3cd5af3` lets the static viewer call the review API only when the local review server identifies itself, and `d29e2e2` updates the lock file. The field table of [[01_PROJECT]] matches the labels that `pipeline/config.py` reads, and its statement that the scripts do not check the language code still holds. `uv run ruff check .`, `uv run ruff format --check .` and `uv lock --check` were clean, and `uv run pytest -q` passed with 498 tests. No Pages site is configured for the repository. The local branch `codex/edition-0.10-review` is fully merged into `main` and was left in place.
+
+#### Next steps
+
+The two operator decisions of 27 September 2026 are still open: how annotations bind in the Pages job, and whether the scripts validate BCP 47 language codes.
