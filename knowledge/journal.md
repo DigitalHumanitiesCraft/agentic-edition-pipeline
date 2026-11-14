@@ -10,12 +10,17 @@ method:
   url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
 status: active
 created: 2026-04-03
-updated: 2026-09-30
+updated: 2026-11-14
 ---
 
 # Journal
 
 The agent appends one entry per work session with date, goal, verified result and open points. A fork keeps the template's entries and appends its own below a heading that names the fork, as [[00_INDEX]] describes.
+
+## Open
+
+- The operator decides how annotations bind in the Pages job. `data/annotations/` is committed while `data/processed/**` is ignored, so in a Pages checkout the canonical transcription is missing and the publication check blocks every edition with annotations (entry of 27 September 2026).
+- The operator decides whether the scripts validate the BCP 47 language codes that become `langUsage/language/@ident` (entry of 27 September 2026, [[01_PROJECT]]).
 
 ## Format
 
@@ -365,3 +370,17 @@ Follow the operator's request that every repository shown with the research tool
 #### Result
 
 The opening note of the README keeps "Research preview" with the version and now adds that the template is a research prototype developed with coding agents, that it is no finished or supported product, that its results need checking before reuse and that feedback belongs in the repository issues. The offline quickstart tests passed. No code, configuration or other document changed.
+
+### 2026-11-14 Dissolve the handoff into the journal
+
+#### Goal
+
+Apply the operator's decision of 14 November 2026 that a Promptotyping repository keeps no `knowledge/handoff.md` and that the journal opens with what is open.
+
+#### Result
+
+`knowledge/handoff.md` held no open item and was removed. The new `## Open` section carries the two operator decisions of 27 September 2026 that the entry of 10 November 2026 named as still open. `AGENTS.md` now routes the session start to the beginning of the journal, [[00_INDEX]] lost the handoff row, and the operator-document list of `tests/test_offline_quickstart.py` no longer expects the file. The historical record in [[decisions]] that names `handoff.md` among the root documents stays as written.
+
+#### Next steps
+
+None beyond `## Open`.

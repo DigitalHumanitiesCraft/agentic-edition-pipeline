@@ -36,7 +36,6 @@ OPERATOR_DOCUMENTS = (
     "knowledge/00_INDEX.md",
     "knowledge/decisions.md",
     "knowledge/journal.md",
-    "knowledge/handoff.md",
     "knowledge/template/overview.md",
     "knowledge/template/lineage.md",
 )
@@ -104,10 +103,16 @@ def _http_get(server: ThreadingHTTPServer, path: str) -> bytes:
         return response.read()
 
 
+# Removed knowledge documents that historical journal entries still name.
+# Those entries stay as written, so their wikilinks are allowed to dangle.
+RETIRED_KNOWLEDGE_DOCUMENTS = {"handoff"}
+
+
 def _assert_operator_document_links(root: Path) -> None:
     # Knowledge documents link each other by Obsidian wikilink, which
     # resolves by file name anywhere below knowledge/.
     knowledge_names = {path.stem for path in (root / "knowledge").rglob("*.md")}
+    knowledge_names |= RETIRED_KNOWLEDGE_DOCUMENTS
     for name in OPERATOR_DOCUMENTS:
         path = root / name
         text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)

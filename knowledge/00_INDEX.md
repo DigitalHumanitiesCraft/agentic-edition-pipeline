@@ -60,8 +60,7 @@ These documents under `knowledge/template/` describe the reusable template and i
 | Document | Content |
 |---|---|
 | [[decisions]] | Architecture decision records (ADR) |
-| [[journal]] | Verified results per work session |
-| [[handoff]] | Open received items until verified integration |
+| [[journal]] | Open work at its beginning, then verified results per work session |
 
 ## Fork inheritance
 

@@ -4,7 +4,7 @@ This contract applies to any AI harness operating the repository. Tool-specific 
 
 ## Orient to the task
 
-Read `knowledge/00_INDEX.md`, `knowledge/handoff.md` and the documents routed to the current task. Check the actual branch, working tree and the complete scripts you are about to change.
+Read `knowledge/00_INDEX.md`, the `## Open` section at the beginning of `knowledge/journal.md` and the documents routed to the current task. Check the actual branch, working tree and the complete scripts you are about to change.
 
 `knowledge/template/overview.md` describes the reusable template. The numbered documents `01_PROJECT.md` through `05_DESIGN.md` configure an individual edition. Preserve their filenames and machine-read fields.
 
