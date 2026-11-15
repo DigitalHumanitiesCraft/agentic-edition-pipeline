@@ -45,7 +45,7 @@ Every chosen task needs an observable acceptance criterion. Larger projects can 
 
 The [local review contract](../reference/local-review.md) defines the local write path. GitHub Pages delivers the static reading view. A save performs no commit, push or scholarly release.
 
-The supplied viewer has no facsimile zoom, no blind first-reading mode, no jump from a metadata value to its source evidence, no version status of individual findings and no separate display of mention, entity, role and authority evidence. A task that needs one of these functions adds its implementation and a test. A stored correction must be verifiable through object, page and change history, and the viewer shows these data in part. A direct display of the canonical file path needs its own implementation.
+The functions the supplied viewer lacks are listed under the open requirements of the [[overview#Open requirements|template overview]]. A task that needs one of them adds its implementation and a test. A stored correction must be verifiable through object, page and change history, and the viewer shows these data in part. A direct display of the canonical file path needs its own implementation.
 
 ## Further project-specific components
 

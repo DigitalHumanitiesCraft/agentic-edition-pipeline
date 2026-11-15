@@ -35,11 +35,9 @@ The architecture keeps the choice of the harness model independent of the choice
 
 The documents `01_PROJECT.md` to `05_DESIGN.md` hold the open settings of an individual edition. Template maintenance and isolated tests keep these placeholders. A fork takes over methods and contracts and makes its own decisions about sources, rights, editorial conventions and models. [[00_INDEX]] explains which records a fork inherits. The historical cases and their provenance are documented in [[lineage]].
 
-## Working contract
+## Working and documentation contract
 
-[AGENTS.md](../../AGENTS.md) holds the shared working contract, and harness-specific entry files point to it. The numbered scripts describe one supplied processing path. Existing transcriptions and TEI files allow other entry points, and the [processing reference](../../reference/pipeline.md) names their dependencies.
-
-The inspection interface and the edition model take shape with the first sample. Text corrections require dependent outputs to be checked again. Stored changes, formal validation and scholarly acceptance remain separate states.
+[AGENTS.md](../../AGENTS.md) holds the shared working contract for every AI harness, including adapters for further methods, the separation of harness and processing models and the separate states of text quality, schema validity and scholarly acceptance. The README explains the repository and its limits, and the commands are in [SETUP.md](../../SETUP.md) and the [processing reference](../../reference/pipeline.md). The numbered scripts describe one supplied processing path and keep their names, and existing transcriptions and TEI files allow other entry points. The inspection interface and the edition model take shape with the first sample, and design accompanies the pipeline without being a mandatory step. Concrete research corpora stay in the provenance documents and never become default configuration. Knowledge documents are English, and [[decisions]] records their division into edition configuration in `knowledge/`, fixed contracts in `reference/` and template knowledge in `knowledge/template/`.
 
 ## Implemented correction contract
 
@@ -50,16 +48,6 @@ Before a stored state is taken over, deterministic quality assessment, text pres
 Optional annotations can bind their input text. Stale annotations are shown and block publication. Their renewal is project-specific, and the template introduces no automatic entity recognition or layout reconstruction.
 
 The interface shows write capability, current text, raw text, change history and provenance. Synthetic tests check stored corrections through to the delivered TEI. Call records and reusable chunk calls extend the transcription path. New provider runs and a scholarly review of transcriptions are outside the technical test evidence.
-
-## Documentation contract
-
-The README explains the repository, reuse, models, tasks and functional limits. The complete commands are in [SETUP.md](../../SETUP.md) and the [processing reference](../../reference/pipeline.md). Concrete research corpora stay in the provenance documents, and their facts do not become default configuration.
-
-[AGENTS.md](../../AGENTS.md) is the shared action layer for AI harnesses, and harness-specific files contain only the entry. Additional methods need a documented adapter or converter whose input, output and provenance are checked. The model choice of the harness is independent of the processing configuration.
-
-The numbered scripts keep their names. Text quality assessment, formal schema validation and scholarly acceptance are described separately. Design is an accompanying specification of the inspection tasks, and the pipeline has no mandatory design step.
-
-Knowledge documents are English. [[decisions]] records the division of documents into edition configuration in `knowledge/`, fixed contracts in `reference/` and knowledge about the template in `knowledge/template/`.
 
 ## Status and scope
 
