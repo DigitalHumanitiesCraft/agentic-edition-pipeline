@@ -129,7 +129,7 @@ Step 6 reads `results/tei/*.xml`, their step-5 reports and the project title. It
 uv run python pipeline/check_publication.py
 ```
 
-The gate exits 0 only when `results/tei/` contains at least one TEI file, no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription every `revisionDesc/@status` is `accepted` and the canonical transcription of each TEI file conforms to the data contract and records `accepted` for every page. The Pages workflow runs this gate, the linter, the format check and the tests, then step 6, and deploys `docs/` on a push to `main`. A project with external TEI maps its review policy to this gate or documents an adaptation.
+The gate exits 0 only when `results/tei/` contains at least one TEI file, no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription, every `revisionDesc/@status` is `accepted`, and the canonical transcription of each TEI file conforms to the data contract and records `accepted` for every page. The Pages workflow runs this gate, the linter, the format check and the tests, then step 6, and deploys `docs/` on a push to `main`. A project with external TEI maps its review policy to this gate or documents an adaptation.
 
 ## Evaluation
 

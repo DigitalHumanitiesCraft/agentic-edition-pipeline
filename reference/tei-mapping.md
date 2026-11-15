@@ -71,6 +71,6 @@ Tables, columns and typographic groups can carry relations between persons, work
 
 ## Maturity of a TEI file
 
-A generated TEI document is a candidate. Well-formedness, RelaxNG conformance and text preservation are technical checks. Only a state that was reviewed accordingly and explicitly confirmed counts as scholarly accepted, and the Pages workflow requires `revisionDesc/@status="accepted"`. Naming a file or folder `final` confirms no maturity.
+A generated TEI document is a candidate. Well-formedness, RelaxNG conformance and text preservation are technical checks. Only a state that was reviewed accordingly and explicitly confirmed counts as scholarly accepted, and the Pages workflow requires `revisionDesc/@status="accepted"` and the human acceptance of every page recorded in the canonical transcription. Naming a file or folder `final` confirms no maturity.
 
 After text corrections, text anchors and dependent findings are checked again. The [local review contract](local-review.md) describes how the correction path protects enriched TEI.
