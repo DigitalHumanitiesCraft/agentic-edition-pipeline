@@ -54,6 +54,7 @@ from config import (
     TRANSCRIPTIONS_DIR,
     ItemFailure,
     add_selection_args,
+    chunk_output_error,
     configure_console,
     ensure_dirs,
     finish_run,
@@ -767,6 +768,10 @@ def main() -> None:
 
     print(f"Transcription: {len(docs)} document(s), provider={provider}, model={model}")
     print(f"Chunk size={args.chunk_size}, delay={args.delay}s\n")
+    output_error = chunk_output_error(provider, args.chunk_size)
+    if output_error:
+        print(f"ERROR: {output_error}.", file=sys.stderr)
+        sys.exit(1)
     if args.dry_run:
         dry_run(docs, base_prompt, provider, model, args.force)
         return

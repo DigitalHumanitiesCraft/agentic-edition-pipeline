@@ -223,6 +223,21 @@ def test_non_finite_retry_after_falls_back_to_backoff(monkeypatch):
     assert sleeps == [llm.BACKOFF_BASE]
 
 
+def test_gemini_safety_stop_is_a_distinct_error(monkeypatch):
+    _all_keys(monkeypatch)
+    payload = {
+        "candidates": [
+            {"finishReason": "SAFETY", "content": {"parts": [{"text": "{"}]}}
+        ]
+    }
+    monkeypatch.setattr(
+        llm, "_request_with_retry", lambda *a, **k: FakeResponse(payload=payload)
+    )
+
+    with pytest.raises(RuntimeError, match="finishReason SAFETY"):
+        llm.call_llm("gemini", "m", "prompt")
+
+
 def test_client_errors_are_not_retried(monkeypatch):
     sleeps = _scripted_requests(monkeypatch, [FakeResponse(status_code=400)])
 

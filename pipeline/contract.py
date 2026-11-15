@@ -107,6 +107,20 @@ def _is_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _record_ok(call: dict) -> bool:
+    """A named call record is a relative POSIX path that cannot leave data/processed/."""
+    if "record" not in call:
+        return True
+    record = call["record"]
+    return (
+        _is_text(record)
+        and "\\" not in record
+        and not record.startswith("/")
+        and ":" not in record
+        and ".." not in record.split("/")
+    )
+
+
 def _is_member(value: object, allowed: frozenset | tuple) -> bool:
     """Check membership without hashing an unhashable JSON value."""
     return isinstance(value, str) and value in allowed
@@ -329,6 +343,8 @@ def edit_violations(page: dict) -> list[str]:
         for key in ("actor", "note"):
             if not _is_text(edit.get(key)):
                 problems.append(f"edit {key} is required")
+            elif XML_INVALID_CHAR.search(edit[key]):
+                problems.append(f"edit {key} contains a character not allowed in XML")
         for key in ("before", "after"):
             value = edit.get(key)
             if not isinstance(value, dict) or set(value) != {"transcription", "notes"}:
@@ -487,6 +503,7 @@ def _step3_violations(value: dict, prefix: str) -> list[str]:
             and all(_is_count(page, 1) for page in call["pages"])
             and _is_count(call.get("attempt"), 1)
             and _is_hex(call.get("prompt_hash"), 12)
+            and _record_ok(call)
             for call in executed
         )
     )
@@ -524,6 +541,7 @@ def _step4_violations(value: dict, prefix: str) -> list[str]:
         isinstance(call, dict)
         and _is_count(call.get("page"), 1)
         and _is_hex(call.get("prompt_hash"), 12)
+        and _record_ok(call)
         for call in executed
     )
     if not valid_calls:
@@ -871,6 +889,13 @@ def file_violations(data: object) -> list[str]:
     metadata = data.get("metadata")
     if metadata is not None:
         problems += metadata_violations(metadata)
+        urls = metadata.get("image_urls") if isinstance(metadata, dict) else None
+        if (
+            isinstance(urls, dict | list)
+            and isinstance(pages, list)
+            and len(urls) > len(pages)
+        ):
+            problems.append("metadata.image_urls lists more images than pages")
 
     confidence = data.get("confidence")
     if confidence is not None and not _is_member(confidence, CONFIDENCE_VALUES):

@@ -23,6 +23,10 @@ The release date is set when the version is tagged. This is the first version wi
 - `contract.py` rejects a review history in which an agent records `human_verified` or `accepted`, and an unknown `actor_kind`.
 - A non-finite `Retry-After` header no longer aborts the provider retry loop.
 - Step 1 imports `pymupdf` instead of the deprecated `fitz`, and the inventory records POSIX paths on every platform.
+- The publication gate requires the canonical transcription of every TEI file to conform to the data contract and to record `accepted` for every page, so a hand-edited `revisionDesc/@status` no longer passes. Imported TEI without a canonical transcription needs an adapted gate.
+- `data/processed/transcriptions/` is versioned by default. SETUP.md names what this puts into a public repository and how to keep the transcriptions local.
+- The Anthropic output limit is configurable through `ANTHROPIC_MAX_TOKENS` (default 32000), and step 3 stops before any call when the limit cannot hold a chunk.
+- The contract rejects call records that leave `data/processed/`, edit actors and notes with characters not allowed in XML, and more `image_urls` than pages. A Gemini answer stopped for a reason other than `STOP` or `MAX_TOKENS` is a distinct error.
 - `CITATION.cff` names both licences and no longer carries a release date that no tag backed. This changelog is new.
 
 ## 0.10.0, research preview

@@ -346,6 +346,20 @@ def test_finish_run_clears_the_error_state_on_success(capsys, tmp_path):
     assert capsys.readouterr().out.strip() == "Done."
 
 
+def test_anthropic_output_limit_must_hold_a_full_chunk(monkeypatch):
+    monkeypatch.setattr(config, "ANTHROPIC_MAX_TOKENS", 4096)
+
+    error = config.chunk_output_error("anthropic", 20)
+
+    assert error and "--chunk-size to 2" in error
+    assert config.chunk_output_error("anthropic", 2) is None
+    assert config.chunk_output_error("gemini", 20) is None
+
+
+def test_default_anthropic_limit_holds_the_default_chunk():
+    assert config.chunk_output_error("anthropic", config.CHUNK_SIZE) is None
+
+
 def test_require_provider_stops_before_a_call(capsys):
     with pytest.raises(SystemExit):
         config.require_provider("mistral", "m")

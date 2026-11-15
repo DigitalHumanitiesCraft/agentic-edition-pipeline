@@ -78,6 +78,13 @@ TEMPERATURE = 0.1
 
 BATCH_DELAY = float(os.environ.get("BATCH_DELAY", "2.0"))
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "20"))
+# Anthropic requires an explicit output limit. A limit the model does not
+# support fails with HTTP 400 before any billing; a limit too small for the
+# chunk fails only after a paid call, so the transcription step compares it
+# with the chunk size first, using a deliberate per-page estimate for a dense
+# page of transcription in JSON.
+ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "32000"))
+OUTPUT_TOKENS_PER_PAGE = 1500
 IMAGE_DPI = int(os.environ.get("IMAGE_DPI", "150"))
 SUPPORTED_PROVIDERS = frozenset({"gemini", "openai", "anthropic", "ollama"})
 
@@ -311,6 +318,21 @@ def provider_config_error(provider: str, model: str) -> str | None:
     if not isinstance(model, str) or not model.strip():
         return f"no model configured for provider {provider!r}"
     return None
+
+
+def chunk_output_error(provider: str, chunk_size: int) -> str | None:
+    """Return an error when the output limit cannot hold a full chunk."""
+    if provider != "anthropic":
+        return None
+    needed = chunk_size * OUTPUT_TOKENS_PER_PAGE
+    if needed <= ANTHROPIC_MAX_TOKENS:
+        return None
+    return (
+        f"ANTHROPIC_MAX_TOKENS={ANTHROPIC_MAX_TOKENS} cannot hold {chunk_size} pages "
+        f"per call (estimated {needed} output tokens); lower --chunk-size to "
+        f"{max(1, ANTHROPIC_MAX_TOKENS // OUTPUT_TOKENS_PER_PAGE)} or raise "
+        "ANTHROPIC_MAX_TOKENS within the model's limit"
+    )
 
 
 def redact_secrets(text: str) -> str:

@@ -29,7 +29,7 @@ import requests
 
 import config
 from call_records import response_data
-from config import redact_secrets
+from config import ANTHROPIC_MAX_TOKENS, redact_secrets
 
 CLOUD_TIMEOUT = 240
 LOCAL_TIMEOUT = 480
@@ -138,8 +138,15 @@ def _call_gemini(
     if "candidates" not in data or not data["candidates"]:
         raise RuntimeError(f"Gemini returned no candidates: {json.dumps(data)[:500]}")
     candidate = data["candidates"][0]
-    if candidate.get("finishReason") == "MAX_TOKENS":
+    finish_reason = candidate.get("finishReason")
+    if finish_reason == "MAX_TOKENS":
         raise _truncated("Gemini", "finishReason", "MAX_TOKENS")
+    # SAFETY, RECITATION and similar reasons stop an answer early; parsing
+    # the fragment would only fail later and invite another paid retry.
+    if finish_reason not in (None, "STOP"):
+        raise RuntimeError(
+            f"Gemini stopped the answer with finishReason {finish_reason}"
+        )
     parts = candidate.get("content", {}).get("parts", [])
     text = "".join(
         part["text"]
@@ -212,7 +219,7 @@ def _call_anthropic(
 
     body = {
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": ANTHROPIC_MAX_TOKENS,
         "messages": [{"role": "user", "content": content}],
         "temperature": temperature,
     }

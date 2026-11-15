@@ -165,11 +165,52 @@ FILE_CASES = {
         ),
         ["does not match prompt_profile"],
     ),
+    "record-leaves-processed": (
+        lambda d: (
+            _claim_step_three(d, list(range(1, len(d["pages"]) + 1))),
+            d["_meta"]["executed_prompts"][0].__setitem__(
+                "record", "../../secret.json"
+            ),
+        ),
+        ["executed_prompts"],
+    ),
+    "surplus-image-urls": (
+        lambda d: d["metadata"].__setitem__(
+            "image_urls",
+            {
+                str(n): f"https://example.org/{n}.jpg"
+                for n in range(1, len(d["pages"]) + 2)
+            },
+        ),
+        ["more images than pages"],
+    ),
     "prompt-log-gap": (
         lambda d: _claim_step_three(d, [999]),
         ["do not cover every page"],
     ),
 }
+
+
+def test_edit_actor_and_note_must_be_xml_characters():
+    page = {
+        "transcription": "after",
+        "notes": "",
+        "edits": [
+            {
+                "id": "6f1c1f7e-1d2b-4c4e-9a43-0c0f8a8b1e11",
+                "timestamp": "2026-08-27T10:00:00+02:00",
+                "actor": "editor",
+                "actor_kind": "human",
+                "note": "fix",
+                "before": {"transcription": "before", "notes": ""},
+                "after": {"transcription": "after", "notes": ""},
+            }
+        ],
+    }
+
+    assert "edit actor contains a character not allowed in XML" in (
+        contract.edit_violations(page)
+    )
 
 
 @pytest.mark.parametrize(
