@@ -111,7 +111,7 @@ Step 3 writes the unchanged first model answer of every page to `transcription_r
 - `human_verified` to `in_review` or `accepted`
 - `accepted` to `in_review`
 
-Every entry in `review.history` names the source state, the target state, the human actor and an ISO timestamp with time zone, in chronological order. `human_verified` and `accepted` also bind the complete TEI-relevant page state through `page_state_hash`, which covers text, page type, foreign-paragraph assignment and notes. A later change invalidates that decision and is blocked before step 4. The canonical command is shown below.
+Every entry in `review.history` names the source state, the target state, the actor with an optional `actor_kind` and an ISO timestamp with time zone, in chronological order. `human_verified` and `accepted` also bind the complete TEI-relevant page state through `page_state_hash`, which covers text, page type, foreign-paragraph assignment and notes. A later change invalidates that decision and is blocked before step 4. The canonical command is shown below.
 
 ```console
 uv run python pipeline/update_review.py --object ID --page N --status STATUS --actor REVIEWER
@@ -121,7 +121,7 @@ The command holds the same repository writer lock as the [local review server](l
 
 ### Object metadata
 
-`metadata` holds the object metadata that passes unchanged from step 3 to step 6. It comes from the inventory alone, which step 2 builds from the source manifest and local files. Step 3 neither requests nor takes over metadata proposed by the model. The mapping of each field to the TEI header is fixed in the [TEI base mapping](tei-mapping.md). `image_urls` declares remote facsimiles as page number to URL, with string keys consecutive from 1, and a list in page order is accepted as well. Every URL starts with `http://` or `https://`.
+`metadata` holds the object metadata that passes unchanged from step 3 to step 6. It comes from the inventory alone, which step 2 builds from the source manifest and local files. Step 3 neither requests nor takes over metadata proposed by the model. The mapping of each field to the TEI header is fixed in the [TEI base mapping](tei-mapping.md). `image_urls` declares remote facsimiles as page number to URL, with string keys consecutive from 1, and a list in page order is accepted as well. Every URL starts with `http://` or `https://`, and the block lists no more URLs than the object has pages.
 
 ### Optional page fields
 
@@ -142,7 +142,7 @@ On mixed pages `foreign_paragraphs` lists the 0-based indices of paragraphs that
 
 ### Quality signals
 
-Step 3 computes `quality_signals`. The block is optional in files produced by a person or an agent. When present, all counters, page types and the boolean `needs_review` must be complete and typed. `needs_review` means an unverified transcription and leads to `needs_review` in step 4.
+Step 3 computes `quality_signals`. The block is optional in files produced by a person or an agent. When present, all counters, page types and the boolean `needs_review` must be complete and typed, and the page types and their counts must match the pages. Character counts are not rechecked, because a hand correction may change them. `needs_review` means an unverified transcription and leads to `needs_review` in step 4.
 
 ### Provenance
 
@@ -167,7 +167,7 @@ Step 4 sets its own provenance block in `_meta` and keeps the transcription prov
 
 The judge vocabulary follows `pipeline/prompts/validation.md`. Its confidence values are `confident`, `likely` and `uncertain`, and its issue types and perspectives are the enumerations in the prompt's fenced block. `judge_vocabulary_hash` identifies the vocabulary a run accepted. An existing validated file stays current only while its input state hash, provider, model, prompt hash and vocabulary hash match the current run. Otherwise the object fails as stale until step 4 runs with `--force`, so old findings never pass for a changed text or a changed judge.
 
-Step 5 accepts only a formally complete validated file whose hashes and statistics still match metadata, pages, raw text, review history, confidence and image binding. [TEI base mapping](tei-mapping.md) describes the step-5 output and its overwrite guard. Step 6 refuses a TEI file whose step-5 report names another `validation_state_hash` than the derivation recorded in the TEI header, because such a file is left over from a failed regeneration. External TEI without a step-5 report is published.
+Step 5 accepts only a formally complete validated file whose hashes and statistics still match metadata, pages, raw text, review history, confidence and image binding. [TEI base mapping](tei-mapping.md) describes the step-5 output and its overwrite guard. Step 6 refuses a TEI file whose step-5 report names another `validation_state_hash` than the derivation recorded in the TEI header, because such a file is left over from a failed regeneration. Step 6 builds external TEI without a step-5 report. The publication gate still blocks it unless a canonical transcription records its acceptance.
 
 ## Source manifest before transcription
 
@@ -179,7 +179,7 @@ Step 2 also marks every inventory document with `transcribable`. Only page image
 
 ## Completeness of model answers
 
-Step 3 requires exactly one page entry per supplied image. With chunked processing every chunk returns its assigned global page numbers unchanged. Missing, duplicated, renumbered or additional model pages violate the contract and produce no transcription file. Image folders without a manifest are sorted naturally by the digits in the file name, and the letter case of image suffixes is irrelevant.
+Step 3 requires exactly one page entry per supplied image. With chunked processing every chunk returns its assigned global page numbers unchanged. Missing, duplicated, renumbered or additional model pages violate the contract and produce no transcription file. Step 3 reads `null` in an optional page field of a model answer as omitted, and the call record keeps the unchanged answer. Image folders without a manifest are sorted naturally by the digits in the file name, and the letter case of image suffixes is irrelevant.
 
 ## Transcriptions produced outside step 3
 
@@ -189,7 +189,7 @@ For the inventory, structured transcription JSON can also lie under `data/source
 
 ## Stored corrections
 
-The optional page block `edits` documents every saved text or notes correction with UUID, actor, role, time, reason and the complete before and after values. The sequence must lead without gaps to the current page state. Model answers may not supply these events, review decisions or raw-text fields themselves. The local service sets corrected pages to `in_review`, and the role `agent` establishes no human review. The [local review contract](local-review.md) describes the details.
+The optional page block `edits` documents every saved text or notes correction with UUID, actor, role, time, reason and the complete before and after values. The sequence must lead without gaps to the current page state. Actor and reason of an edit are limited to the XML 1.0 character range. Model answers may not supply these events, review decisions or raw-text fields themselves. The local service sets corrected pages to `in_review`, and the role `agent` establishes no human review. The [local review contract](local-review.md) describes the details.
 
 The static frontend takes over no complete provider answers and no raw transcriptions.
 

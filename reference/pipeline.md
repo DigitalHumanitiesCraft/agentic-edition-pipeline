@@ -67,7 +67,7 @@ Step 3 reads `data/inventory.json` and the page images of transcribable document
 
 It reads `TRANSCRIPTION_PROVIDER` and `TRANSCRIPTION_MODEL`, which default to `gemini` and `gemini-2.5-flash`, and requires the adapter's credential. A missing credential or an emptied setting stops the run before any call. `--dry-run` calls no provider and needs no key. It lists each document as `CURRENT` (existing output kept), `PENDING` (would call the provider) or with the upper-cased name of the stage that would fail, and exits 1 if any document would fail.
 
-`--chunk-size` (default `CHUNK_SIZE`) bounds the images per call. `--delay` (default `BATCH_DELAY`) pauses after a document that called the provider. `--force` requests fresh calls for existing output. An existing output that no longer matches its recorded inputs fails with stage `stale` until `--force` is given, and output with review history is never replaced.
+`--chunk-size` (default `CHUNK_SIZE`) bounds the images per call. With the Anthropic adapter, a chunk size whose estimated output exceeds `ANTHROPIC_MAX_TOKENS` stops the run before any call. `--delay` (default `BATCH_DELAY`) pauses after a document that called the provider. `--force` requests fresh calls for existing output. An existing output that no longer matches its recorded inputs fails with stage `stale` until `--force` is given, and output with review history is never replaced.
 
 The prompt layers are listed in [SETUP.md](../SETUP.md#transcription-prompt). A declared profile without its file fails the document, and the profile key `README` is refused. An unparseable answer gets one retry with a JSON hint. A truncated answer fails the document with stage `truncated` and no second call, because a repeat would hit the same output limit.
 
@@ -119,7 +119,7 @@ uv run python pipeline/06_build_frontend.py
 uv run python pipeline/06_build_frontend.py --serve
 ```
 
-Step 6 reads `results/tei/*.xml`, their step-5 reports and the project title. It writes `docs/data/catalog.json`, `docs/data/{id}.json`, `docs/tei/{id}.xml` and verified image snapshots under `docs/images/{id}/`, and removes obsolete files from that set. Every run rebuilds all objects. A TEI file whose step-5 report names another derivation is left over from a failed regeneration and is refused. External TEI without a report is published.
+Step 6 reads `results/tei/*.xml`, their step-5 reports and the project title. It writes `docs/data/catalog.json`, `docs/data/{id}.json`, `docs/tei/{id}.xml` and verified image snapshots under `docs/images/{id}/`, and removes obsolete files from that set. Every run rebuilds all objects. A TEI file whose step-5 report names another derivation is left over from a failed regeneration and is refused. Step 6 builds external TEI without a report, and the publication gate blocks it unless a canonical transcription records its acceptance.
 
 `--serve` previews `docs/` at http://127.0.0.1:8080/ after a successful build. The preview and the review server both default to port 8080, so run one at a time or give the review server another `--port`.
 
@@ -129,7 +129,7 @@ Step 6 reads `results/tei/*.xml`, their step-5 reports and the project title. It
 uv run python pipeline/check_publication.py
 ```
 
-The gate exits 0 only when `results/tei/` contains at least one TEI file, no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription, every `revisionDesc/@status` is `accepted`, and the canonical transcription of each TEI file conforms to the data contract and records `accepted` for every page. The Pages workflow runs this gate, the linter, the format check and the tests, then step 6, and deploys `docs/` on a push to `main`. A project with external TEI maps its review policy to this gate or documents an adaptation.
+The gate exits 0 only when `results/tei/` contains at least one TEI file, no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription, every `revisionDesc/@status` is `accepted`, and the canonical transcription of each TEI file conforms to the data contract and records `accepted` for every page. The Pages workflow runs this gate, the linter, the format check and the tests, then step 6, and deploys `docs/` on a push to `main`. TEI without a canonical transcription, such as imported TEI, needs an adapted gate.
 
 ## Evaluation
 

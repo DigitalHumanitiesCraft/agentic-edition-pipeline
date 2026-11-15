@@ -29,7 +29,7 @@ uv run python pipeline/validate_schema.py --schema schemas/basisformat_ms.rng   
 
 [Jing](https://relaxng.org/jclark/jing.html) works as well, for example `jing schemas/tei_all.rng results/tei/*.xml`.
 
-The deterministic TEI generator produces minimal DTABf-oriented structures. Project-specific extensions require the same RelaxNG check before publication.
+The deterministic TEI generator produces minimal body structures oriented on DTABf. Project-specific extensions require the same RelaxNG check before publication.
 
 ## Choosing a validation schema
 
