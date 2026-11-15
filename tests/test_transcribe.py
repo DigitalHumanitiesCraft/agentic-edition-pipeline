@@ -28,10 +28,20 @@ from conftest import (
 step3 = importlib.import_module("03_transcribe")
 
 
-def test_null_page_type_counts_as_omitted():
-    result = {"pages": [{"page": 1, "transcription": "x", "page_type": None}]}
+def test_null_optional_page_fields_count_as_omitted():
+    result = {
+        "pages": [
+            {
+                "page": 1,
+                "transcription": "x",
+                "page_type": None,
+                "notes": None,
+                "foreign_paragraphs": None,
+            }
+        ]
+    }
 
-    step3._omit_null_page_types(result)
+    step3._omit_null_optional_fields(result)
 
     assert result == {"pages": [{"page": 1, "transcription": "x"}]}
 

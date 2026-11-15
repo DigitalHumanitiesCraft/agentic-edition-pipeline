@@ -372,17 +372,22 @@ def transcribe_chunk(
     return result, calls
 
 
-def _omit_null_page_types(result: object) -> None:
-    """Treat an explicit null page_type as the omitted field it stands for.
+OPTIONAL_PAGE_FIELDS = ("page_type", "notes", "foreign_paragraphs")
 
-    The prompt asks models to omit page_type on content pages, and smaller
-    local models answer with null instead. Null carries no other reading, and
-    the unchanged answer stays in the private call record.
+
+def _omit_null_optional_fields(result: object) -> None:
+    """Treat an explicit null in an optional page field as the omitted field.
+
+    The prompt asks models to omit these fields when they do not apply, and
+    smaller local models answer with null instead. Null carries no other
+    reading, and the unchanged answer stays in the private call record.
     """
     pages = result.get("pages") if isinstance(result, dict) else None
     for page in pages if isinstance(pages, list) else []:
-        if isinstance(page, dict) and "page_type" in page and page["page_type"] is None:
-            del page["page_type"]
+        if isinstance(page, dict):
+            for field in OPTIONAL_PAGE_FIELDS:
+                if field in page and page[field] is None:
+                    del page[field]
 
 
 def _chunk_violations(result: object, expected: list[int]) -> list[str]:
@@ -476,7 +481,7 @@ def _cached_chunk(
         raise ItemFailure(
             "parse", f"JSON parse failed for chunk {index + 1} after retry"
         )
-    _omit_null_page_types(result)
+    _omit_null_optional_fields(result)
     problems = _chunk_violations(result, expected)
     if problems:
         raise ItemFailure(
