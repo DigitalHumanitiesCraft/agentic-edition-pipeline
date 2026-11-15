@@ -1,10 +1,17 @@
 # Changelog
 
-Changes to the template, per version. Versions follow the numbering in `pyproject.toml`, which `CITATION.cff`, `codemeta.json` and the README repeat. All versions so far are research previews without a stable release. The journal in `knowledge/journal.md` records the work in detail.
+Changes to the template, per version. Versions follow Semantic Versioning in `pyproject.toml`, which `CITATION.cff`, `codemeta.json` and the README repeat. Beside the number each version names its review state: `built` when the executable checks pass, `reviewed` when in addition an independent agent with fresh context reports no material finding and the knowledge documents match code and data, `validated` when in addition a named person or role with the required expertise has accepted the state for a named purpose. Version 1.0 requires `validated`. All versions so far are research previews without a stable release. The journal in `knowledge/journal.md` records the work in detail.
 
-## 0.11.0, research preview
+## 0.11.0, research preview, reviewed
 
 The release date is set when the version is tagged. This is the first version with a Git tag.
+
+### Review state
+
+- Checked by executable checks: the test suite, Ruff lint and format, the lock check and the offline quickstart from a fresh clone.
+- Checked by independent agent reviews with fresh context on 15 November 2026, in three rounds: the code against the data contracts, a newcomer run of the quickstart and SETUP.md in a fresh clone that followed only the documentation, a full reading of the knowledge base, the references and AGENTS.md against the code, and a confirmation review of the last fixes. The last review reported no material finding.
+- Checked with a local provider: Ollama with `qwen3.5:4b` transcribed a synthetic two-page PDF through steps 1 to 6.
+- Not checked: any run on real sources, any paid provider, transcription quality on historical material, the Pages deployment of an edition, and acceptance by a person. No person has validated this version.
 
 ### Changed against 0.10.0
 

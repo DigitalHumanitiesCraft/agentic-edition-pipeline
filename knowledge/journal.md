@@ -26,6 +26,7 @@ The agent appends one entry per work session with date, goal, verified result an
 - `knowledge/00_INDEX.md`, `knowledge/template/overview.md` and `knowledge/template/lineage.md` carry `status: complete` beside the research-preview label. The field states document maturity, and whether it stays is open.
 - Step 4 does not treat a change of its deterministic rules as staleness. Recomputing on such a change would also discard paid judge results, so a fix needs a design that renews only the deterministic part (entry of 15 November 2026).
 - A review save replaces the judge findings of unedited pages in the validated file, and they survive only in the backup (entry of 15 November 2026).
+- Robustness gaps found in review round 3 without a fix yet: step 1 and the facsimile fetcher share `data/processed/images/errors.json`, so one run clears the other's failures; a failed call-record write in `call_records.py` can replace the original provider error, and a non-JSON provider body is not recorded; the viewer does not show unreadable proposals; the offline quickstart removes its workspace with the diagnostics on any failure and its copied `config.py` can read settings from a `.env` in a parent directory; step 2 duplicates content when the inventory markers in `02_DATA.md` are reversed; `review_state.py` assumes the TEI has the matching `pb` and a `titleStmt` (entry of 15 November 2026).
 - A stable version 1.0 needs a completed and accepted run with a real edition project: a corpus with cleared rights, a paid pilot with a chosen model and cost limit, a named person for the scholarly review and acceptance, and a decision on publishing that project's site. The questions are with the operator (entry of 15 November 2026).
 
 ## Format
@@ -442,3 +443,21 @@ A second review (agentic review, two read-only reviewers) found one material pro
 A local run with Ollama and `qwen3.5:4b` on a synthetic two-page PDF first failed closed at the contract, because the model answered `null` for omitted optional page fields. Step 3 now reads such a null as omitted (`d093b5e` and the following commit). The repeated run passed steps 1 to 6, the TEI was valid against TEI All, both page transcriptions matched the synthetic source line by line, with added blank lines that split the text into more paragraphs, and the publication gate blocked as expected because no page was reviewed. No paid provider was called.
 
 Evidence: `uv run pytest -q` passed with 510 tests, `ruff check`, `ruff format --check` and `uv lock --check` were clean. The local run used a scratch clone with no `.env`.
+
+### 2026-11-15 Evaluation round 3 and the review state of 0.11.0
+
+#### Goal
+
+Close the smaller gaps that need no decision, run a third independent review with full reading, and apply the operator's convention on versions and review states of 15 November 2026.
+
+#### Result
+
+Decision of the research coordination of 15 November 2026: an object whose rebuild fails does not keep its last publication, so step 6 keeps removing it as the tests require.
+
+The contract checks stored page types and their counts against the pages, numeric settings stop with the variable's name, and the review server names a missing related file (`ca891cd`). Step-4 staleness on rule changes stays open, because recomputing would discard paid judge results.
+
+Round 3 ran two read-only reviewers with full reading. The documentation reviewer found no material problem and nine omissions in the data contract and processing reference, which `b0e1ef4` corrects. The code reviewer of the modules earlier rounds had not read found one material defect, the RelaxNG check of `aep_eval` failing on comments inside the TEI root, and several minor ones. `fe39258` corrects the defect and the clear minor findings with tests, and the rest went to `## Open`. A confirmation review of the three commits reported no material finding.
+
+Following the convention, version 0.11.0 carries the review state `reviewed`. README and `CHANGELOG.md` state it, and the changelog names what was checked and by what, and what stayed unchecked.
+
+Evidence: `uv run pytest -q` passed with 515 tests, `ruff check`, `ruff format --check`, `uv lock --check` and `git diff --check` were clean.
