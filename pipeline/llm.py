@@ -32,6 +32,13 @@ from call_records import response_data
 from config import ANTHROPIC_MAX_TOKENS, redact_secrets
 
 CLOUD_TIMEOUT = 240
+# A non-streamed answer sends no byte until it is complete, so the read
+# timeout must cover the slowest expected generation of the full output
+# limit; otherwise a long chunk times out and is retried as paid calls.
+SLOW_OUTPUT_TOKENS_PER_SECOND = 30
+ANTHROPIC_TIMEOUT = max(
+    CLOUD_TIMEOUT, ANTHROPIC_MAX_TOKENS / SLOW_OUTPUT_TOKENS_PER_SECOND
+)
 LOCAL_TIMEOUT = 480
 
 MAX_RETRIES = 4
@@ -225,7 +232,7 @@ def _call_anthropic(
     }
 
     resp = _request_with_retry(
-        "POST", url, headers=headers, json=body, timeout=CLOUD_TIMEOUT
+        "POST", url, headers=headers, json=body, timeout=ANTHROPIC_TIMEOUT
     )
     data = response_data(resp)
 

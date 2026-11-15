@@ -372,6 +372,19 @@ def transcribe_chunk(
     return result, calls
 
 
+def _omit_null_page_types(result: object) -> None:
+    """Treat an explicit null page_type as the omitted field it stands for.
+
+    The prompt asks models to omit page_type on content pages, and smaller
+    local models answer with null instead. Null carries no other reading, and
+    the unchanged answer stays in the private call record.
+    """
+    pages = result.get("pages") if isinstance(result, dict) else None
+    for page in pages if isinstance(pages, list) else []:
+        if isinstance(page, dict) and "page_type" in page and page["page_type"] is None:
+            del page["page_type"]
+
+
 def _chunk_violations(result: object, expected: list[int]) -> list[str]:
     """Check one chunk answer against the contract for its page range.
 
@@ -463,6 +476,7 @@ def _cached_chunk(
         raise ItemFailure(
             "parse", f"JSON parse failed for chunk {index + 1} after retry"
         )
+    _omit_null_page_types(result)
     problems = _chunk_violations(result, expected)
     if problems:
         raise ItemFailure(

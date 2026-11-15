@@ -238,6 +238,24 @@ def test_gemini_safety_stop_is_a_distinct_error(monkeypatch):
         llm.call_llm("gemini", "m", "prompt")
 
 
+def test_anthropic_timeout_covers_the_output_limit(monkeypatch):
+    _all_keys(monkeypatch)
+    seen = {}
+
+    def fake(method, url, **kwargs):
+        seen.update(kwargs)
+        return FakeResponse(payload=ANSWERS["anthropic"])
+
+    monkeypatch.setattr(llm, "_request_with_retry", fake)
+
+    llm.call_llm("anthropic", "m", "prompt")
+
+    assert seen["json"]["max_tokens"] == config.ANTHROPIC_MAX_TOKENS
+    assert seen["timeout"] * llm.SLOW_OUTPUT_TOKENS_PER_SECOND >= (
+        config.ANTHROPIC_MAX_TOKENS
+    )
+
+
 def test_client_errors_are_not_retried(monkeypatch):
     sleeps = _scripted_requests(monkeypatch, [FakeResponse(status_code=400)])
 

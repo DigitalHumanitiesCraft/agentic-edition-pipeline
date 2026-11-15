@@ -70,9 +70,13 @@ def test_hand_edited_accepted_attribute_does_not_pass_the_gate(repository):
     forged = accept_pages(make_transcription())
     forged["pages"][0]["transcription"] = "Changed after acceptance"
     _canonical(repository, forged)
-    assert publication.publication_problems([candidate], repository / "schema.rng") == [
-        "doc1.xml has a canonical transcription that violates the data contract"
-    ]
+    (problem,) = publication.publication_problems(
+        [candidate], repository / "schema.rng"
+    )
+    assert problem.startswith(
+        "doc1.xml has a canonical transcription that violates the data contract: "
+    )
+    assert "current page state" in problem
 
 
 def test_publication_accepts_schema_valid_accepted_tei(repository):

@@ -35,8 +35,12 @@ def _acceptance_problems(name: str, canonical: dict | None) -> list[str]:
         return [
             f"{name} has no readable canonical transcription recording its acceptance"
         ]
-    if contract.file_violations(canonical):
-        return [f"{name} has a canonical transcription that violates the data contract"]
+    violations = contract.file_violations(canonical)
+    if violations:
+        return [
+            f"{name} has a canonical transcription that violates the data contract: "
+            + violations[0]
+        ]
     pages = canonical.get("pages") or []
     if not pages or any(page["review"]["status"] != "accepted" for page in pages):
         return [f"{name} has pages whose recorded human review is not accepted"]

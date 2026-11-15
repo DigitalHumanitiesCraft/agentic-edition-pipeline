@@ -27,6 +27,15 @@ from conftest import (
 
 step3 = importlib.import_module("03_transcribe")
 
+
+def test_null_page_type_counts_as_omitted():
+    result = {"pages": [{"page": 1, "transcription": "x", "page_type": None}]}
+
+    step3._omit_null_page_types(result)
+
+    assert result == {"pages": [{"page": 1, "transcription": "x"}]}
+
+
 SECRET = "AIzaTESTKEY0123456789"
 CALL_RECORD = {"chunk": 1, "pages": [1], "attempt": 1, "prompt_hash": "a" * 12}
 
