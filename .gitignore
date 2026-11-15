@@ -20,6 +20,10 @@ __pycache__/
 # Keep re-obtainable data (remote facsimiles, bulk scans) ignored.
 data/processed/**
 !data/processed/.gitkeep
+# The canonical transcriptions carry the review history the publication gate
+# checks, so they are versioned. Delete these two lines to keep them local.
+!data/processed/transcriptions/
+!data/processed/transcriptions/**
 data/review-proposals/**
 data/sources/**
 !data/sources/manifest.json

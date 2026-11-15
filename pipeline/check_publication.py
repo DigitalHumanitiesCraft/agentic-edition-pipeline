@@ -2,8 +2,10 @@
 
 Blocks publication while a review transaction awaits recovery, when a TEI
 candidate is schema-invalid, when optional annotations are not bound to the
-current canonical transcription, and when revisionDesc/@status is not
-accepted. Exit code 0 only when every candidate passes.
+current canonical transcription, when revisionDesc/@status is not
+accepted, and when the canonical transcription does not record the human
+acceptance of every page. The TEI attribute alone is not trusted, since a
+hand edit could set it. Exit code 0 only when every candidate passes.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from pathlib import Path
 from lxml import etree
 
 import config
+import contract
 import validate_schema
 from review_state import PENDING_MARKER, dependencies, workflow
 
@@ -24,6 +27,20 @@ def _canonical(object_id: str) -> dict | None:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _acceptance_problems(name: str, canonical: dict | None) -> list[str]:
+    """Require the recorded human acceptance behind an accepted TEI."""
+    if canonical is None:
+        return [
+            f"{name} has no readable canonical transcription recording its acceptance"
+        ]
+    if contract.file_violations(canonical):
+        return [f"{name} has a canonical transcription that violates the data contract"]
+    pages = canonical.get("pages") or []
+    if not pages or any(page["review"]["status"] != "accepted" for page in pages):
+        return [f"{name} has pages whose recorded human review is not accepted"]
+    return []
 
 
 def publication_problems(files: list[Path], schema: Path) -> list[str]:
@@ -42,7 +59,9 @@ def publication_problems(files: list[Path], schema: Path) -> list[str]:
     for path, result in zip(files, results, strict=True):
         if not result.valid:
             continue
-        states = dependencies(config.PROJECT_ROOT, path.stem, _canonical(path.stem))
+        canonical = _canonical(path.stem)
+        problems.extend(_acceptance_problems(path.name, canonical))
+        states = dependencies(config.PROJECT_ROOT, path.stem, canonical)
         if any(item["status"] != "current" for item in states):
             problems.append(
                 f"{path.name} has stale, unbound or unverifiable annotations"

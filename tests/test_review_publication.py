@@ -5,7 +5,7 @@ import pytest
 import check_publication
 import config
 import validate_schema
-from conftest import minimal_tei, write_json
+from conftest import accept_pages, make_transcription, minimal_tei, write_json
 from review_state import canonical_sha256
 
 
@@ -41,7 +41,7 @@ def test_annotations_need_verifiable_current_binding(repository):
         minimal_tei(revision_desc='<revisionDesc status="accepted"/>'),
         encoding="utf-8",
     )
-    data = {"pages": [{"transcription": "Text"}]}
+    data = accept_pages(make_transcription(object_id="doc"))
     write_json(
         repository / "data/annotations/doc.json",
         {"_meta": {"transcription_sha256": canonical_sha256(data)}},
@@ -51,5 +51,6 @@ def test_annotations_need_verifiable_current_binding(repository):
     assert _problems(repository, tei)
     write_json(canonical, data)
     assert not _problems(repository, tei)
-    write_json(canonical, {"pages": [{"transcription": "Changed"}]})
+    changed = accept_pages(make_transcription(["Changed"], object_id="doc"))
+    write_json(canonical, changed)
     assert "stale" in _problems(repository, tei)[0]

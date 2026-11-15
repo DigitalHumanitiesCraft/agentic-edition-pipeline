@@ -217,6 +217,33 @@ def make_transcription(pages=("Text",), object_id: str = "doc1", **extra) -> dic
     }
 
 
+def accept_pages(data: dict) -> dict:
+    """Record the full human review path to accepted on every page."""
+    import contract
+
+    for page in data["pages"]:
+        page_hash = contract.review_page_state_hash(page)
+        page["review"] = {
+            "status": "accepted",
+            "history": [
+                review_event("machine_unreviewed", "in_review"),
+                review_event(
+                    "in_review",
+                    "human_verified",
+                    "2026-08-27T10:01:00+02:00",
+                    page_state_hash=page_hash,
+                ),
+                review_event(
+                    "human_verified",
+                    "accepted",
+                    "2026-08-27T10:02:00+02:00",
+                    page_state_hash=page_hash,
+                ),
+            ],
+        }
+    return data
+
+
 def minimal_tei(page_break: str = '<pb n="1"/>', revision_desc: str = "") -> str:
     """A small TEI document with the header fields step 6 reads."""
     return (
