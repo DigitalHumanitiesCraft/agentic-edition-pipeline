@@ -19,16 +19,14 @@ The agent appends one entry per work session with date, goal, verified result an
 
 ## Open
 
-- The operator decides how annotations bind in the Pages job. `data/annotations/` is committed while `data/processed/**` is ignored, so in a Pages checkout the canonical transcription is missing and the publication check blocks every edition with annotations (entry of 27 September 2026).
+- The operator sets the release date, tags and releases version 0.11.0. The date goes into `CHANGELOG.md` and as `date-released` into `CITATION.cff` (entries of 15 November 2026).
+- The Pages workflow fails on every push to `main` of the template repository, because it holds no TEI for the publication gate. A condition that skips the deploy job only in the template repository was refused by the permission check of the agent session and needs the operator's release or the operator's own edit (entry of 15 November 2026).
+- The operator decides whether step 6 keeps the last publication of an object whose rebuild failed. Today it removes it, as the tests require (entry of 15 November 2026).
 - The operator decides whether the scripts validate the BCP 47 language codes that become `langUsage/language/@ident` (entry of 27 September 2026, [[01_PROJECT]]).
-- The operator tags and releases version 0.11.0 and sets its release date in `CHANGELOG.md` and as `date-released` in `CITATION.cff` (entry of 15 November 2026).
-- The Pages workflow fails on every push to `main`, because the template has no Pages site and no TEI for the publication gate. The operator decides whether it runs only on `workflow_dispatch` in the template (entry of 15 November 2026).
+- Annotation bindings in the Pages job should pass now that canonical transcriptions are versioned, which settles the cause named on 27 September 2026. No Pages run with annotations has verified it.
 - `knowledge/00_INDEX.md`, `knowledge/template/overview.md` and `knowledge/template/lineage.md` carry `status: complete` beside the research-preview label. The field states document maturity, and whether it stays is open.
-- The operator decides whether the publication gate cross-checks `revisionDesc/@status="accepted"` in the TEI against the human decisions recorded in the canonical transcription. Today the gate trusts the TEI attribute, so a hand edit of that attribute passes, and the transcriptions are not in Git by default (entry of 15 November 2026).
-- The operator decides whether a fork versions `data/processed/transcriptions/` by default. SETUP.md describes the current ignore rules and the negation (entry of 15 November 2026).
-- The Anthropic adapter sends `max_tokens` 4096 while `CHUNK_SIZE` defaults to 20 pages, so longer chunks end as `truncated` after a paid call. A fix needs a decision on a configurable limit or a smaller chunk default for that provider (entry of 15 November 2026).
-- Step 6 removes the previous publication of an object whose rebuild failed, which the tests require. Whether a failed object keeps its last publication instead is open (entry of 15 November 2026).
-- Smaller contract gaps found in review: `executed_prompts[].record` is not validated, `quality_signals` counters are not checked against the pages, extra `image_urls` beyond the page count pass and are dropped in step 5, edit `actor` and `note` are not checked for XML-invalid characters until TEI generation, step 4 staleness ignores changes to the deterministic rules, a review save replaces judge findings of unedited pages in the validated file, Gemini finish reasons other than STOP and MAX_TOKENS count as complete, and a missing related file yields a 404 "Unknown document" from the review server (entry of 15 November 2026).
+- Smaller gaps without a decision yet: `quality_signals` counters are not checked against the pages, step 4 staleness ignores changes to the deterministic rules, a review save replaces judge findings of unedited pages in the validated file, a missing related file yields a 404 "Unknown document" from the review server, and a non-integer `ANTHROPIC_MAX_TOKENS` or `CHUNK_SIZE` stops every step at import.
+- A stable version 1.0 needs a completed and accepted run with a real edition project: a corpus with cleared rights, a paid pilot with a chosen model and cost limit, a named person for the scholarly review and acceptance, and a decision on publishing that project's site. The questions are with the operator (entry of 15 November 2026).
 
 ## Format
 
@@ -426,3 +424,21 @@ Corrected at the cause: `contract.py` now rejects a review history in which an a
 Not changed: a change that let a failed object keep its previous publication contradicted tests that require its removal and was reverted. Design questions and smaller contract gaps went to `## Open`.
 
 Evidence: `uv run pytest -q` passed with 501 tests, `ruff check` and `ruff format --check` were clean.
+
+### 2026-11-15 Evaluation round 2 and a local provider run
+
+#### Goal
+
+Carry out the decisions the research coordination took on 15 November 2026 for reversible technical questions, run a second independent review and test the transcription path with a local provider on synthetic sources.
+
+#### Result
+
+Decisions of the research coordination of 15 November 2026: the publication gate checks the human acceptance recorded in the canonical transcription and not only the TEI attribute; forks version `data/processed/transcriptions/` by default; the Anthropic adapter gets a configurable output limit with an early check; the tested removal of a failed object's previous publication stays and goes to the operator as a question; duplicated knowledge sections are merged where a pointer suffices, without deleting a document.
+
+Implemented: the gate requires the canonical transcription of each TEI file to conform to the contract and to record `accepted` for every page, and a test shows that a hand-edited `accepted` attribute without that record, with an unaccepted record or with a record changed after acceptance does not pass (`81c8bae`). `.gitignore` re-includes the canonical transcriptions, and SETUP.md names what that puts into a public fork, that call records stay private and how to keep transcriptions local. `ANTHROPIC_MAX_TOKENS` (default 32000) is checked against the chunk size before any call, and the Anthropic read timeout grows with it (`c53ef9f`, `d093b5e`). The contract now rejects call records that leave `data/processed/`, edit actors and notes with characters not allowed in XML and more `image_urls` than pages, and a Gemini stop other than STOP or MAX_TOKENS is a distinct error. The overview merges its working and documentation contract sections, and 05_DESIGN points to the open requirements (`22beb7d`).
+
+A second review (agentic review, two read-only reviewers) found one material problem in the new Anthropic limit, a 240-second read timeout against an output of up to 32000 tokens, which `d093b5e` corrected, and a journal `## Open` section that lagged the code, which this entry and the rewritten section correct. The reference documents now state the full gate condition.
+
+A local run with Ollama and `qwen3.5:4b` on a synthetic two-page PDF first failed closed at the contract, because the model answered `null` for omitted optional page fields. Step 3 now reads such a null as omitted (`d093b5e` and the following commit). The repeated run passed steps 1 to 6, the TEI was valid against TEI All, both page transcriptions matched the synthetic source line by line, with added blank lines that split the text into more paragraphs, and the publication gate blocked as expected because no page was reviewed. No paid provider was called.
+
+Evidence: `uv run pytest -q` passed with 510 tests, `ruff check`, `ruff format --check` and `uv lock --check` were clean. The local run used a scratch clone with no `.env`.

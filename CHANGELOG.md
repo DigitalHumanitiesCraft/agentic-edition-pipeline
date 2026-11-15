@@ -27,6 +27,9 @@ The release date is set when the version is tagged. This is the first version wi
 - `data/processed/transcriptions/` is versioned by default. SETUP.md names what this puts into a public repository and how to keep the transcriptions local.
 - The Anthropic output limit is configurable through `ANTHROPIC_MAX_TOKENS` (default 32000), and step 3 stops before any call when the limit cannot hold a chunk.
 - The contract rejects call records that leave `data/processed/`, edit actors and notes with characters not allowed in XML, and more `image_urls` than pages. A Gemini answer stopped for a reason other than `STOP` or `MAX_TOKENS` is a distinct error.
+- The Anthropic read timeout grows with the output limit, so a long chunk no longer times out into paid retries.
+- Step 3 reads `null` in the optional page fields `page_type`, `notes` and `foreign_paragraphs` as omitted. Smaller local models answer this way, and the unchanged answer stays in the call record.
+- The publication gate names the first contract violation of a blocking canonical transcription.
 - `CITATION.cff` names both licences and no longer carries a release date that no tag backed. This changelog is new.
 
 ## 0.10.0, research preview
