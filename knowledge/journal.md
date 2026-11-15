@@ -10,7 +10,7 @@ method:
   url: https://lisa.gerda-henkel-stiftung.de/digitale_geschichte_pollin
 status: active
 created: 2026-04-03
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Journal
@@ -21,6 +21,9 @@ The agent appends one entry per work session with date, goal, verified result an
 
 - The operator decides how annotations bind in the Pages job. `data/annotations/` is committed while `data/processed/**` is ignored, so in a Pages checkout the canonical transcription is missing and the publication check blocks every edition with annotations (entry of 27 September 2026).
 - The operator decides whether the scripts validate the BCP 47 language codes that become `langUsage/language/@ident` (entry of 27 September 2026, [[01_PROJECT]]).
+- The operator tags and releases version 0.11.0 and sets its release date in `CHANGELOG.md` and as `date-released` in `CITATION.cff` (entry of 15 November 2026).
+- The Pages workflow fails on every push to `main`, because the template has no Pages site and no TEI for the publication gate. The operator decides whether it runs only on `workflow_dispatch` in the template (entry of 15 November 2026).
+- `knowledge/00_INDEX.md` and `knowledge/template/overview.md` carry `status: complete` beside the research-preview label. The field states document maturity, and whether it stays is open.
 
 ## Format
 
@@ -384,3 +387,21 @@ Apply the operator's decision of 14 November 2026 that a Promptotyping repositor
 #### Next steps
 
 None beyond `## Open`.
+
+### 2026-11-15 Prepare version 0.11.0 for tagging
+
+#### Goal
+
+Bring the repository to a state the operator can tag as a research preview that the Promptotyping paper can cite, without tagging or releasing it.
+
+#### Result
+
+The metadata named version 0.10.0, recorded on 8 September 2026 (`730d737`) and never tagged. Since then 18 commits changed code, tests and knowledge, among them the viewer's DOM rendering against attribute injection and the review-API identity check. A tag 0.10.0 on the current state would therefore name two different states, so the version is now 0.11.0. `pyproject.toml` holds it, `CITATION.cff`, `codemeta.json`, the README and the new `CHANGELOG.md` repeat it, and `tests/test_version_metadata.py` fails when they disagree. `CITATION.cff` lost the release date that no tag backed and names MIT and CC BY 4.0. The README note states that the template is tested only on synthetic data and that no edition project has completed and accepted a run with real sources.
+
+A documentation audit against the code (agentic review, read-only) found no broken command, option, path or variable. Corrected were the quickstart report and cleanup behaviour, the edition-type rule, the empty-TEI condition and the format check of the publication gate, the defaults of the transcription settings, the unshipped example profile and the README sentence on Pages.
+
+Evidence: a fresh clone ran `uv run python examples/offline-quickstart/run.py` with `UV_OFFLINE=1` and built two objects. `uv run pytest -q` passed with 499 tests, and `ruff check`, `ruff format --check`, `uv lock --check` and `git diff --check` were clean. The project configures no type checker. The tracked files contain no credentials and no third-party personal data, the fixtures and quickstart corpus are synthetic, and no Pages site exists.
+
+#### Next steps
+
+See `## Open`.

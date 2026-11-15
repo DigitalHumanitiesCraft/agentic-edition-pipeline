@@ -15,7 +15,7 @@ updated: 2026-09-30
 
 # Template overview
 
-The repository is a reusable template for digital edition workflows run in an AI harness. It connects maintained project knowledge with processing scripts, prompts and data contracts, and an agent uses this context to configure and adapt an edition. The template is a research preview without a stable release. `pyproject.toml` and `CITATION.cff` carry the current version.
+The repository is a reusable template for digital edition workflows run in an AI harness. It connects maintained project knowledge with processing scripts, prompts and data contracts, and an agent uses this context to configure and adapt an edition. The template is a research preview without a stable release. `pyproject.toml` holds the current version, which `CITATION.cff`, `codemeta.json`, the README and `CHANGELOG.md` repeat.
 
 ## Conceptual basis
 

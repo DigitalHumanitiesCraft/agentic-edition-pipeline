@@ -2,7 +2,7 @@
   "@context": "https://w3id.org/codemeta/3.0",
   "@type": "SoftwareSourceCode",
   "name": "Agentic Edition Pipeline",
-  "softwareVersion": "0.10.0",
+  "softwareVersion": "0.11.0",
   "description": "Forkable repository template for digital edition workflows with an AI harness, reusable project knowledge and adaptable processing tools.",
   "codeRepository": "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline",
   "programmingLanguage": "Python",
@@ -20,6 +20,6 @@
       "sameAs": "https://github.com/chpollin"
     }
   ],
-  "license": "https://spdx.org/licenses/MIT",
-  "dateModified": "2026-09-08"
+  "license": ["https://spdx.org/licenses/MIT", "https://spdx.org/licenses/CC-BY-4.0"],
+  "dateModified": "2026-11-15"
 }

@@ -2,12 +2,27 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using these metadata."
 type: software
 title: "Agentic Edition Pipeline"
-version: "0.10.0"
-date-released: "2026-09-08"
+version: "0.11.0"
+abstract: >-
+  A forkable repository template for digital edition workflows operated with an
+  AI harness. It combines a knowledge base for the edition's decisions with
+  Python scripts, prompts and data contracts for image transcription, quality
+  assessment, TEI-XML generation, local correction and static publication.
+  Research preview without a stable release, tested only on synthetic data.
 authors:
   - family-names: Pollin
     given-names: Christopher
-    affiliation: "Digital Humanities Craft OG"
     orcid: "https://orcid.org/0000-0002-4879-129X"
+    affiliation: "Digital Humanities Craft OG"
 repository-code: "https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline"
-license: MIT
+license:
+  - MIT
+  - CC-BY-4.0
+keywords:
+  - digital edition
+  - TEI
+  - HTR
+  - large language models
+  - AI harness
+  - digital humanities
+  - research software
