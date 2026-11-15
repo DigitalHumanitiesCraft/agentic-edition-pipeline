@@ -16,7 +16,7 @@ In the workspace it runs, through their command-line interfaces:
 2. TEI generation (`05_annotate_tei.py --all --force`).
 3. RelaxNG validation against the shipped TEI All schema.
 4. The frontend build (`06_build_frontend.py`).
-5. `aep_eval` on the synthetic fixture manifest, writing to `results/evaluation/`.
+5. `aep_eval` on the synthetic fixture manifest, writing to `results/evaluation/`. The fixtures include a deliberately invalid TEI, so the aggregate `relaxng valid 1/2` is the expected result.
 
 The schema and evaluation steps always run, and their exit statuses become checks. When every check passes, the runner writes `quickstart-report.json` with the checks, the object IDs, the schema target, the evaluation manifest, a check that the provider settings were cleared and the ownership marker. A failing build step or check ends the run with an error and removes the workspace.
 

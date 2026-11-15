@@ -23,7 +23,12 @@ The agent appends one entry per work session with date, goal, verified result an
 - The operator decides whether the scripts validate the BCP 47 language codes that become `langUsage/language/@ident` (entry of 27 September 2026, [[01_PROJECT]]).
 - The operator tags and releases version 0.11.0 and sets its release date in `CHANGELOG.md` and as `date-released` in `CITATION.cff` (entry of 15 November 2026).
 - The Pages workflow fails on every push to `main`, because the template has no Pages site and no TEI for the publication gate. The operator decides whether it runs only on `workflow_dispatch` in the template (entry of 15 November 2026).
-- `knowledge/00_INDEX.md` and `knowledge/template/overview.md` carry `status: complete` beside the research-preview label. The field states document maturity, and whether it stays is open.
+- `knowledge/00_INDEX.md`, `knowledge/template/overview.md` and `knowledge/template/lineage.md` carry `status: complete` beside the research-preview label. The field states document maturity, and whether it stays is open.
+- The operator decides whether the publication gate cross-checks `revisionDesc/@status="accepted"` in the TEI against the human decisions recorded in the canonical transcription. Today the gate trusts the TEI attribute, so a hand edit of that attribute passes, and the transcriptions are not in Git by default (entry of 15 November 2026).
+- The operator decides whether a fork versions `data/processed/transcriptions/` by default. SETUP.md describes the current ignore rules and the negation (entry of 15 November 2026).
+- The Anthropic adapter sends `max_tokens` 4096 while `CHUNK_SIZE` defaults to 20 pages, so longer chunks end as `truncated` after a paid call. A fix needs a decision on a configurable limit or a smaller chunk default for that provider (entry of 15 November 2026).
+- Step 6 removes the previous publication of an object whose rebuild failed, which the tests require. Whether a failed object keeps its last publication instead is open (entry of 15 November 2026).
+- Smaller contract gaps found in review: `executed_prompts[].record` is not validated, `quality_signals` counters are not checked against the pages, extra `image_urls` beyond the page count pass and are dropped in step 5, edit `actor` and `note` are not checked for XML-invalid characters until TEI generation, step 4 staleness ignores changes to the deterministic rules, a review save replaces judge findings of unedited pages in the validated file, Gemini finish reasons other than STOP and MAX_TOKENS count as complete, and a missing related file yields a 404 "Unknown document" from the review server (entry of 15 November 2026).
 
 ## Format
 
@@ -297,7 +302,7 @@ The template contains no released research TEI, so the locally executed publicat
 
 #### Open scholarly and functional work
 
-The extensions named in `specification.md` (today [[overview]]) and the user acceptance remain open. A real edition fork needs its own rights decisions, source review, model evaluation and scholarly release. Git state, knowledge index, requirements, this journal and the empty inbox [[handoff]] suffice as entry for later work, and no additional handoff snapshot was created.
+The extensions named in `specification.md` (today [[overview]]) and the user acceptance remain open. A real edition fork needs its own rights decisions, source review, model evaluation and scholarly release. Git state, knowledge index, requirements, this journal and the then-empty inbox `handoff.md` (removed on 14 November 2026) suffice as entry for later work, and no additional handoff snapshot was created.
 
 ### 2026-09-08 Time limit of the HTTP integration test
 
@@ -405,3 +410,19 @@ Evidence: a fresh clone ran `uv run python examples/offline-quickstart/run.py` w
 #### Next steps
 
 See `## Open`.
+
+### 2026-11-15 Evaluation round 1 toward a stable template
+
+#### Goal
+
+Have three independent reviewers with fresh context check the template without a real provider or corpus, and correct what they find.
+
+#### Result
+
+Three read-only agent reviews ran: code against the data contracts, a newcomer run of the quickstart and SETUP.md in a fresh clone that followed only the documentation, and a cross-reading of the knowledge base. The newcomer run passed every deterministic step as documented, including the review server and the publication gate, and found no blocking failure.
+
+Corrected at the cause: `contract.py` now rejects a review history in which an actor declared as `agent` records `human_verified` or `accepted`, and an unknown `actor_kind`, which before was enforced only by `update_review.py`. A non-finite `Retry-After` no longer aborts the retry loop. Step 1 imports `pymupdf` instead of the deprecated `fitz`, and the inventory writes POSIX paths on every platform. New tests cover the first two. SETUP.md now states what `--dry-run` shows, that the hand-made transcription route bypasses the inventory, what the template versions in Git and what the publication gate does not check. The quickstart guide explains the expected `relaxng valid 1/2`, and a dead link to `handoff` in this journal is plain text.
+
+Not changed: a change that let a failed object keep its previous publication contradicted tests that require its removal and was reverted. Design questions and smaller contract gaps went to `## Open`.
+
+Evidence: `uv run pytest -q` passed with 501 tests, `ruff check` and `ruff format --check` were clean.

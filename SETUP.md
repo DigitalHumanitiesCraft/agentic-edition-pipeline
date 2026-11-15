@@ -61,7 +61,7 @@ Document titles and languages come from the object metadata. A document without 
 | Page scans | `data/sources/images/{doc_id}/` | Inventory |
 | Remote facsimiles | Ordered URLs in `data/sources/manifest.json` | Inventory, then `fetch_facsimiles.py --all --from-manifest` |
 | Plain text or PAGE XML | `data/sources/text/` | Write a converter to the transcription JSON contract |
-| Transcription JSON under the data contract | `data/processed/transcriptions/` | Quality assessment |
+| Transcription JSON under the data contract | `data/processed/transcriptions/` (create the folder) | Quality assessment, bypassing the inventory |
 | Existing TEI | Source under `data/sources/text/`, checked candidates in `results/tei/` | Frontend build |
 
 The optional source manifest declares document IDs, prompt profiles, metadata and remote pages where file names do not carry them. Its format is specified in the [data contract](reference/data-contract.md). The inventory marks which documents have page images for transcription. It converts no text formats or TEI. Imported metadata, imported transcriptions and independent reference editions keep separate provenance and declared roles.
@@ -94,7 +94,7 @@ A change to any layer is a new prompt state. Check the JSON and TEI mapping of c
 
 ### Pilot before a corpus run
 
-Fix a varied pilot sample in `03_CONTEXT.md` with its expected readings and unresolved cases. Check the inputs and prompts of the pilot documents with `--dry-run`, then run them one by one with `--object`, since `--sample N` takes the first N transcribable documents in inventory order. Inspect the results against the source images. Authorize a corpus-wide provider run only after that inspection. The [evaluation reference](reference/evaluation.md) states what a pilot establishes.
+Fix a varied pilot sample in `03_CONTEXT.md` with its expected readings and unresolved cases. Check the inputs and output state of the pilot documents with `--dry-run`, which prints no prompt. The prompt layers are the files under `pipeline/prompts/` that the processing reference names, and each transcription records the layers and their hash that reached the model. Then run them one by one with `--object`, since `--sample N` takes the first N transcribable documents in inventory order. Inspect the results against the source images. Authorize a corpus-wide provider run only after that inspection. The [evaluation reference](reference/evaluation.md) states what a pilot establishes.
 
 ### Processing parameters
 
@@ -124,4 +124,6 @@ Define the inspection interface in `05_DESIGN.md` with the first sample and refi
 
 Corrections run through the local editor and human review decisions through `update_review.py`, both described in the [processing reference](reference/pipeline.md#review-states-and-corrections). A human correction becomes an evaluation reference only once its verification method is recorded in `03_CONTEXT.md`.
 
-Before enabling GitHub Pages, clear the source rights, approve the public contents and run the [publication gate](reference/pipeline.md#publication-gate) locally. Then set the Pages source to GitHub Actions in the repository settings. The supplied workflow deploys on every push to `main` that passes the gate, the linter, the format check and the tests.
+The template's `.gitignore` versions the source manifest and the TEI under `results/tei/`, but not the canonical transcriptions with their review histories and corrections (`data/processed/**`), review proposals, step reports or generated frontend data. A fork that wants its review record in Git adds a recursive negation such as `!data/processed/transcriptions/**`. Without it, annotations bound to a transcription block the publication gate in the Pages job, because the bound transcription is missing there.
+
+The publication gate checks schema validity, recovery state, annotation bindings and `accepted` review states. It does not check source rights or the project fields, which stay human checkpoints. Before enabling GitHub Pages, clear the source rights, approve the public contents and run the [publication gate](reference/pipeline.md#publication-gate) locally. Then set the Pages source to GitHub Actions in the repository settings. The supplied workflow deploys on every push to `main` that passes the gate, the linter, the format check and the tests.

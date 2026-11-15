@@ -16,7 +16,6 @@ __pycache__/
 # not its contents. To version files below an ignored tree you need a
 # recursive negation for the contents, e.g.:
 #   !data/sources/text/*.json    # check in a small transcription fixture set
-#   !results/tei/**              # check in TEI candidates for project gates
 #   !docs/data/**                # check in the generated frontend data
 # Keep re-obtainable data (remote facsimiles, bulk scans) ignored.
 data/processed/**
