@@ -54,7 +54,8 @@ def evaluate_cer(fx: Fixture) -> Record:
     }
     pages = list(fx.hypothesis.pages) if fx.hypothesis.pages is not None else None
     hyp = profiles.read_side(prof, fx.hypothesis.kind, fx.hypothesis.path, pages)
-    ref = profiles.read_side(prof, fx.reference.kind, fx.reference.path)
+    ref_pages = list(fx.reference.pages) if fx.reference.pages is not None else None
+    ref = profiles.read_side(prof, fx.reference.kind, fx.reference.path, ref_pages)
     if not ref:
         raise ValueError("reference text is empty after extraction")
     result = cer.score(ref, hyp)
@@ -103,7 +104,15 @@ def run_manifest(
                     records.append(evaluate_cer(fx))
                 elif check == "relaxng":
                     records.append(evaluate_relaxng(fx, schema_cache))
-            except (OSError, ValueError, RuntimeError) as exc:
+            # TypeError and AttributeError come from malformed fixture JSON;
+            # the fixture is recorded as an error and the run continues.
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                TypeError,
+                AttributeError,
+            ) as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 print(f"ERROR {fx.id} [{check}] {message}", file=sys.stderr)
                 errors.append({"fixture_id": fx.id, "stage": check, "message": message})

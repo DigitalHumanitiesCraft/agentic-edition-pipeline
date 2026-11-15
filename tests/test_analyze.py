@@ -171,6 +171,15 @@ def test_inventory_marks_sources_without_page_images(data):
     assert table.count("| no, no page images |") == 1
 
 
+def test_image_folder_manifest_is_not_a_page(data):
+    _pages(data.sources / "images" / "scan", ".png", 2)
+    write_json(data.sources / "images" / "scan" / "manifest.json", {"pages": []})
+
+    documents = step2.scan_sources()
+
+    assert documents["scan"]["pages"] == 2
+
+
 def test_analyze_counts_json_pages_from_pages_array(data, fixture_transcription):
     write_json(data.sources / "text" / "fixture1.json", fixture_transcription)
 

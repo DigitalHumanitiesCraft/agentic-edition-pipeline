@@ -63,7 +63,7 @@ export async function mountReview(host, object, pageIndex, onSaved) {
     const history = element("details", undefined, section);
     element("summary", "TEI-Herkunft und Änderungen", history);
     for (const change of workflow.changes) {
-      element("p", [change.when, change.actor, change.actor_kind, change.text].filter(Boolean).join(" · "), history);
+      element("p", [change.when, change.actor, change.actor_kind, change.text].filter(Boolean).join(", "), history);
     }
   }
   if (!local) return;
@@ -90,7 +90,7 @@ export async function mountReview(host, object, pageIndex, onSaved) {
       element("summary", "Änderungsverlauf dieser Seite", changes);
       for (const edit of page.edits) {
         const item = element("div", undefined, changes);
-        element("p", `${edit.timestamp} · ${edit.actor} (${edit.actor_kind}) · ${edit.note}`, item);
+        element("p", `${edit.timestamp}, ${edit.actor} (${edit.actor_kind}): ${edit.note}`, item);
         details(item, "Vorher", edit.before.transcription + "\n\nNotizen: " + edit.before.notes);
         details(item, "Nachher", edit.after.transcription + "\n\nNotizen: " + edit.after.notes);
       }
@@ -117,7 +117,7 @@ export async function mountReview(host, object, pageIndex, onSaved) {
       element("summary", "Gespeicherte Vorschläge", list);
       for (const proposal of proposals) {
         const current = proposal.version === doc.version;
-        const item = details(list, `${proposal.actor} (${proposal.actor_kind}) · ${current ? "aktuelle Grundlage" : "veraltete Grundlage"}`, proposal.transcription + "\n\n" + proposal.note);
+        const item = details(list, `${proposal.actor} (${proposal.actor_kind}), ${current ? "aktuelle Grundlage" : "veraltete Grundlage"}`, proposal.transcription + "\n\n" + proposal.note);
         const use = element("button", "In das Eingabefeld laden", item, "btn");
         use.type = "button";
         use.disabled = !current;

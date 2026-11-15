@@ -22,6 +22,19 @@ def test_invalid_file_fails_with_located_errors():
     assert result.to_dict()["error_count"] == len(result.errors)
 
 
+def test_comments_inside_the_root_do_not_break_the_check(tmp_path):
+    path = tmp_path / "commented.xml"
+    text = (FIXTURES / "good.xml").read_text(encoding="utf-8")
+    root_end = text.index(">", text.index("<TEI")) + 1
+    path.write_text(
+        text[:root_end] + "<!-- imported -->" + text[root_end:], encoding="utf-8"
+    )
+
+    result = tei_check.check_tei(path, MINI)
+
+    assert result.well_formed and result.has_tei_header
+
+
 def test_not_well_formed_is_reported(tmp_path):
     path = tmp_path / "broken.xml"
     path.write_text("<TEI><open>", encoding="utf-8")

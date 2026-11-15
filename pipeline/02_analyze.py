@@ -105,6 +105,13 @@ def scan_sources() -> dict[str, dict]:
             continue
         if path == SOURCES_DIR / SOURCE_MANIFEST_NAME:
             continue
+        # An image folder may carry the manifest the image resolver reads;
+        # it describes the pages and is not one of them.
+        if (
+            path.name == "manifest.json"
+            and path.parent.parent == SOURCES_DIR / "images"
+        ):
+            continue
         ext = path.suffix.lower()
         source_type = EXT_MAP.get(ext)
         if source_type is None:

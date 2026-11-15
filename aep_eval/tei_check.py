@@ -13,6 +13,10 @@ from pathlib import Path
 
 from lxml import etree
 
+# Evaluation inputs are untrusted files: no entity expansion, DTD loading or
+# network access, independent of the lxml defaults.
+_PARSER = etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True)
+
 MAX_ERRORS = 20
 
 
@@ -56,13 +60,15 @@ def check_tei(
     a large schema for every file of a fixture set."""
     rng = schema if schema is not None else load_schema(schema_path)
     try:
-        doc = etree.parse(str(path))
+        doc = etree.parse(str(path), _PARSER)
     except etree.XMLSyntaxError as exc:
         return TeiCheckResult(
             path, schema_path, False, False, False, [f"not well-formed: {exc}"]
         )
     root = doc.getroot()
-    has_header = any(etree.QName(el).localname == "teiHeader" for el in root.iter())
+    has_header = any(
+        etree.QName(el).localname == "teiHeader" for el in root.iter(etree.Element)
+    )
     if rng.validate(doc):
         return TeiCheckResult(path, schema_path, True, has_header, True)
     errors = [f"line {e.line}: {e.message}" for e in rng.error_log]

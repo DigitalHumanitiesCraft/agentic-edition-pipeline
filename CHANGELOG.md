@@ -32,6 +32,9 @@ The release date is set when the version is tagged. This is the first version wi
 - The publication gate names the first contract violation of a blocking canonical transcription.
 - The contract checks that stored page types and their counts match the pages. Character counts stay unchecked, because a hand correction may change them.
 - A non-numeric value of a numeric setting stops with the variable's name instead of a traceback, and the review server names a missing related file by file name.
+- The RelaxNG check of `aep_eval` no longer fails on comments or processing instructions inside the TEI root, parses without entity expansion or network access, applies page selections to the reference side and records malformed fixture JSON as an error instead of aborting the run.
+- Step 2 no longer counts the `manifest.json` of an image folder as a page, and the facsimile fetcher caps a server's `Retry-After`.
+- The viewer falls back to the catalog on a malformed address and keeps the page index within a reloaded object, and its review panel no longer uses the middle dot as a separator.
 - `CITATION.cff` names both licences and no longer carries a release date that no tag backed. This changelog is new.
 
 ## 0.10.0, research preview

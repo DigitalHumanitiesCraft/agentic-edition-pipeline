@@ -243,6 +243,19 @@ def test_transient_remote_failure_is_retried(monkeypatch, image_root):
     assert session.calls == [P1, P1]
 
 
+def test_server_retry_after_is_capped(monkeypatch, image_root):
+    sleeps = []
+    monkeypatch.setattr(fetch.time, "sleep", sleeps.append)
+    install_session(
+        monkeypatch,
+        FakeResponse(status_code=429, headers={"retry-after": "86400"}),
+        _image_response(),
+    )
+
+    assert fetch.fetch_object("doc1", [(1, P1)], force=True) == []
+    assert max(sleeps) == fetch.FETCH_MAX_RETRY_WAIT
+
+
 def test_permanent_http_error_is_not_retried(monkeypatch, image_root):
     session = install_session(monkeypatch, FakeResponse(status_code=404))
 

@@ -56,7 +56,13 @@ function loadObject(id) {
 function getRoute() {
   const h = location.hash.replace(/^#\/?/, "");
   const m = h.match(/^viewer\/(.+)$/);
-  return m ? {view: "viewer", id: decodeURIComponent(m[1])} : {view: "catalog"};
+  if (!m) return {view: "catalog"};
+  try {
+    return {view: "viewer", id: decodeURIComponent(m[1])};
+  } catch {
+    // A malformed escape in a hand-typed address falls back to the catalog.
+    return {view: "catalog"};
+  }
 }
 
 function navigate() {
@@ -234,7 +240,7 @@ async function reloadAfterSave(text) {
   const id = state.currentObject.id;
   state.currentObject = await loadObject(id);
   await loadCatalog();
-  state.currentPage = pageIndex;
+  state.currentPage = Math.min(pageIndex, state.currentObject.pages.length - 1);
   renderViewer(id);
   notice.textContent = text;
 }

@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
-import os
+import math
 import sys
 import time
 from pathlib import Path
@@ -62,13 +62,14 @@ from config import (
 )
 
 FETCH_TIMEOUT = 60
+FETCH_MAX_RETRY_WAIT = 120
 FETCH_DELAY_SECONDS = env_number("FETCH_DELAY_SECONDS", "0.5", float)
 FETCH_MAX_RETRIES = env_number("FETCH_MAX_RETRIES", "3", int)
 FETCH_BACKOFF_SECONDS = env_number("FETCH_BACKOFF_SECONDS", "1.0", float)
 # Upper bound for one downloaded facsimile, held in memory before it is
 # verified. An uncompressed 600-dpi A3 RGB TIFF (7020 x 9900 pixels) is about
 # 208 MB and fits; an endless or hostile response is cut off.
-FETCH_MAX_BYTES = int(os.environ.get("FETCH_MAX_BYTES", str(256 * 1024 * 1024)))
+FETCH_MAX_BYTES = env_number("FETCH_MAX_BYTES", str(256 * 1024 * 1024), int)
 FETCH_USER_AGENT = (
     "agentic-edition-pipeline "
     "(+https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/issues)"
@@ -170,7 +171,13 @@ def _request_with_retry(
             server_delay = float(retry_after)
         except (TypeError, ValueError):
             server_delay = 0.0
-        backoff = max(server_delay, FETCH_BACKOFF_SECONDS * (2**attempt))
+        if not math.isfinite(server_delay):
+            server_delay = 0.0
+        # A hostile or misconfigured Retry-After must not stall the run.
+        backoff = min(
+            max(server_delay, FETCH_BACKOFF_SECONDS * (2**attempt)),
+            FETCH_MAX_RETRY_WAIT,
+        )
         if backoff > 0:
             time.sleep(backoff)
         attempt += 1
