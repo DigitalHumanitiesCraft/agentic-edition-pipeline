@@ -47,7 +47,7 @@ The scripts read only those rows of the field table in `01_PROJECT.md` whose lab
 | Title | Projektname, Titel | Catalog and frontend title, `Digital Edition` when missing |
 | Editor | Herausgeber | TEI `titleStmt/editor` |
 | Institution | Publisher | TEI `publisher`. Without it, the TEI states that no publisher is declared |
-| Edition type | Editionstyp | A value containing `normalis` selects normalised whitespace comparison, any other value diplomatic |
+| Edition type | Editionstyp | A value containing `normalis` or `normaliz`, in any letter case, joins the lines of a paragraph with a space instead of `<lb/>`, any other value keeps the line breaks (diplomatic) |
 | Language | Sprache | Language of documents whose metadata declares none, written as the `ident` of TEI `langUsage`, so enter a language code such as `de` |
 | License | Licence, Lizenz | TEI licence statement |
 
@@ -124,4 +124,4 @@ Define the inspection interface in `05_DESIGN.md` with the first sample and refi
 
 Corrections run through the local editor and human review decisions through `update_review.py`, both described in the [processing reference](reference/pipeline.md#review-states-and-corrections). A human correction becomes an evaluation reference only once its verification method is recorded in `03_CONTEXT.md`.
 
-Before enabling GitHub Pages, clear the source rights, approve the public contents and run the [publication gate](reference/pipeline.md#publication-gate) locally. Then set the Pages source to GitHub Actions in the repository settings. The supplied workflow deploys on every push to `main` that passes the gate, the linter and the tests.
+Before enabling GitHub Pages, clear the source rights, approve the public contents and run the [publication gate](reference/pipeline.md#publication-gate) locally. Then set the Pages source to GitHub Actions in the repository settings. The supplied workflow deploys on every push to `main` that passes the gate, the linter, the format check and the tests.

@@ -65,7 +65,7 @@ uv run python pipeline/03_transcribe.py --all --chunk-size 10 --delay 5
 
 Step 3 reads `data/inventory.json` and the page images of transcribable documents. Under `--all` it names and skips documents flagged `transcribable: false`, and `--sample` counts only transcribable documents. `--object` with such a document exits 1. The step writes `data/processed/transcriptions/{id}.json`, one call record per provider call under `data/processed/llm-calls/{id}/` and verified chunks under `data/processed/chunk-cache/{id}/`.
 
-It requires `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL` and the adapter's credential, and a missing setting stops the run before any call. `--dry-run` calls no provider and needs no key. It lists each document as `CURRENT` (existing output kept), `PENDING` (would call the provider) or with the upper-cased name of the stage that would fail, and exits 1 if any document would fail.
+It reads `TRANSCRIPTION_PROVIDER` and `TRANSCRIPTION_MODEL`, which default to `gemini` and `gemini-2.5-flash`, and requires the adapter's credential. A missing credential or an emptied setting stops the run before any call. `--dry-run` calls no provider and needs no key. It lists each document as `CURRENT` (existing output kept), `PENDING` (would call the provider) or with the upper-cased name of the stage that would fail, and exits 1 if any document would fail.
 
 `--chunk-size` (default `CHUNK_SIZE`) bounds the images per call. `--delay` (default `BATCH_DELAY`) pauses after a document that called the provider. `--force` requests fresh calls for existing output. An existing output that no longer matches its recorded inputs fails with stage `stale` until `--force` is given, and output with review history is never replaced.
 
@@ -129,7 +129,7 @@ Step 6 reads `results/tei/*.xml`, their step-5 reports and the project title. It
 uv run python pipeline/check_publication.py
 ```
 
-The gate exits 0 only when no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription and every `revisionDesc/@status` is `accepted`. The Pages workflow runs this gate, the linter and the tests, then step 6, and deploys `docs/` on a push to `main`. A project with external TEI maps its review policy to this gate or documents an adaptation.
+The gate exits 0 only when `results/tei/` contains at least one TEI file, no review transaction awaits recovery, every file in `results/tei/` is valid against `VALIDATION_SCHEMA`, optional annotations are bound to the current transcription and every `revisionDesc/@status` is `accepted`. The Pages workflow runs this gate, the linter, the format check and the tests, then step 6, and deploys `docs/` on a push to `main`. A project with external TEI maps its review policy to this gate or documents an adaptation.
 
 ## Evaluation
 

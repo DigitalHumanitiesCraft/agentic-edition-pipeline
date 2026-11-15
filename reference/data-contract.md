@@ -4,6 +4,8 @@ One data contract binds step 3 (transcription), step 4 (quality assessment), ste
 
 ## Transcription file
 
+The example declares a prompt profile `correspondence`. The template ships no such profile, and a fork adds its own profiles under `pipeline/prompts/profiles/`.
+
 ```json
 {
   "_meta": {

@@ -1,6 +1,6 @@
 # Agentic Edition Pipeline
 
-> Research preview, version 0.10.0. The Agentic Edition Pipeline is a research prototype developed with coding agents. It is a repository template for digital edition workflows that an AI harness operates. The template is under active development and has no stable release yet. It is not a finished or supported product, and its results need checking before any reuse. Feedback belongs in the [issues of the repository](https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/issues).
+> Research preview, version 0.11.0, without a stable release. The template itself is tested only on synthetic data. Earlier development runs in separate repositories used historical documents, but no edition project has yet completed and accepted a run with real sources, a real provider, rights clearance and scholarly review. The Agentic Edition Pipeline is a research prototype developed with coding agents. It is a repository template for digital edition workflows that an AI harness operates. The template is under active development. It is not a finished or supported product, and its results need checking before any reuse. Feedback belongs in the [issues of the repository](https://github.com/DigitalHumanitiesCraft/agentic-edition-pipeline/issues).
 
 A forkable repository template for digital edition workflows operated with an AI harness, the working environment in which an agent reads the repository, runs tools and changes files. The template combines a knowledge base for the edition's decisions with Python scripts, prompts and data contracts for image transcription, quality assessment, TEI-XML generation, local correction and static publication.
 
@@ -40,7 +40,7 @@ Existing transcription JSON enters at quality assessment and existing checked TE
 
 The model that runs the AI harness and the models the processing scripts call are configured independently. The supplied adapters connect Gemini, OpenAI, Anthropic and Ollama, and other LLMs, specialist OCR/HTR engines or machine-learning methods enter through an adapter or format converter that satisfies the same data and provenance contracts. Base TEI generation calls no model. Named entities, authority links and document-specific layout need an explicitly implemented extension.
 
-The frontend shows facsimiles beside the text, review states, provenance and TEI downloads. GitHub Pages serves it read-only. Corrections go through the local service, which writes version-checked changes into the repository files and leaves committing, pushing and acceptance to the responsible people.
+The frontend shows facsimiles beside the text, review states, provenance and TEI downloads. Once an edition fork has enabled GitHub Pages and passed the publication gate, Pages serves it read-only. The template repository itself has no Pages site. Corrections go through the local service, which writes version-checked changes into the repository files and leaves committing, pushing and acceptance to the responsible people.
 
 ## Documentation
 

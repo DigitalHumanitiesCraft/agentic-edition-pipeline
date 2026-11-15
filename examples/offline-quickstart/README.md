@@ -18,7 +18,7 @@ In the workspace it runs, through their command-line interfaces:
 4. The frontend build (`06_build_frontend.py`).
 5. `aep_eval` on the synthetic fixture manifest, writing to `results/evaluation/`.
 
-A failing build step stops the run. The schema and evaluation steps always run, and their exit statuses become checks in `quickstart-report.json`, which also records the object IDs, the schema target, the evaluation manifest, the cleared provider settings and the ownership marker. The run fails when any check fails.
+The schema and evaluation steps always run, and their exit statuses become checks. When every check passes, the runner writes `quickstart-report.json` with the checks, the object IDs, the schema target, the evaluation manifest, a check that the provider settings were cleared and the ownership marker. A failing build step or check ends the run with an error and removes the workspace.
 
 ## Target and ownership
 
