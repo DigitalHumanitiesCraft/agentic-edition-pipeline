@@ -384,6 +384,13 @@ def _review_violations(
             problems.append(f"{event_prefix} is not an allowed review transition")
         if not _is_text(event.get("actor")):
             problems.append(f"{event_prefix} has no actor")
+        # actor_kind is optional for older histories; when declared, an agent
+        # may move a page into review but never record a human decision.
+        actor_kind = event.get("actor_kind")
+        if actor_kind is not None and not _is_member(actor_kind, ("human", "agent")):
+            problems.append(f"{event_prefix} has an unknown actor_kind")
+        if actor_kind == "agent" and _is_member(target_status, HUMAN_DECISIONS):
+            problems.append(f"{event_prefix} records a human decision by an agent")
         if _is_member(target_status, HUMAN_DECISIONS) and not _is_hex(
             event.get("page_state_hash"), 64
         ):

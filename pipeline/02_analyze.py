@@ -141,7 +141,7 @@ def scan_sources() -> dict[str, dict]:
                 "source_type": source_type,
                 "pages": 0,
                 "format": ext.lstrip("."),
-                "path": str(path.parent.relative_to(SOURCES_DIR)),
+                "path": path.parent.relative_to(SOURCES_DIR).as_posix(),
                 "files": [],
             }
         documents[doc_id]["files"].append(path.name)
@@ -325,7 +325,7 @@ def scan_extracted_images(documents: dict[str, dict]) -> dict[str, dict]:
                 "source_type": "extracted_image",
                 "pages": page_count,
                 "format": _dominant_format(doc_dir),
-                "path": str(doc_dir.relative_to(PROCESSED_DIR)),
+                "path": doc_dir.relative_to(PROCESSED_DIR).as_posix(),
                 "files": [f.name for f in list_page_images(doc_dir)],
             }
 

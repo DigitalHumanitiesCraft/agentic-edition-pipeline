@@ -209,6 +209,20 @@ def test_retry_after_is_capped(monkeypatch):
     assert sleeps == [llm.MAX_RETRY_WAIT]
 
 
+def test_non_finite_retry_after_falls_back_to_backoff(monkeypatch):
+    sleeps = _scripted_requests(
+        monkeypatch,
+        [
+            FakeResponse(status_code=429, headers={"Retry-After": "NaN"}),
+            FakeResponse(payload={}),
+        ],
+    )
+
+    llm._request_with_retry("POST", "https://host/api")
+
+    assert sleeps == [llm.BACKOFF_BASE]
+
+
 def test_client_errors_are_not_retried(monkeypatch):
     sleeps = _scripted_requests(monkeypatch, [FakeResponse(status_code=400)])
 

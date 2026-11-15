@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import pymupdf as fitz
 
 from config import (
     IMAGE_DPI,

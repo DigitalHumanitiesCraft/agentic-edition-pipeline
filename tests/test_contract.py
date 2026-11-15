@@ -223,6 +223,35 @@ def test_accepted_review_is_bound_to_the_exact_transcription(fixture_transcripti
     assert_violation(contract.file_violations(fixture_transcription), stale)
 
 
+def test_agent_cannot_record_a_human_decision(fixture_transcription):
+    page = fixture_transcription["pages"][0]
+    page_hash = contract.review_page_state_hash(page)
+    page["review"] = {
+        "status": "human_verified",
+        "history": [
+            review_event("machine_unreviewed", "in_review", actor_kind="agent"),
+            review_event(
+                "in_review",
+                "human_verified",
+                "2026-08-27T10:01:00+02:00",
+                page_state_hash=page_hash,
+                actor_kind="agent",
+            ),
+        ],
+    }
+    assert_violation(
+        contract.file_violations(fixture_transcription), "human decision by an agent"
+    )
+
+    page["review"]["history"][1]["actor_kind"] = "human"
+    assert contract.file_violations(fixture_transcription) == []
+
+    page["review"]["history"][1]["actor_kind"] = "robot"
+    assert_violation(
+        contract.file_violations(fixture_transcription), "unknown actor_kind"
+    )
+
+
 @pytest.mark.parametrize("field", ["transcription", "notes"])
 def test_characters_outside_xml_are_rejected(fixture_transcription, field):
     page = fixture_transcription["pages"][0]

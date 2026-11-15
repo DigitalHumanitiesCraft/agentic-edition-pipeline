@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import mimetypes
 import re
 import sys
@@ -273,6 +274,8 @@ def _retry_wait(response: requests.Response | None, attempt: int) -> float:
     try:
         server_delay = float(headers.get("Retry-After", ""))
     except (TypeError, ValueError):
+        server_delay = 0.0
+    if not math.isfinite(server_delay):
         server_delay = 0.0
     return min(max(server_delay, BACKOFF_BASE * (2**attempt)), MAX_RETRY_WAIT)
 

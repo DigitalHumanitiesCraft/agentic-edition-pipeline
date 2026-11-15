@@ -20,6 +20,9 @@ The release date is set when the version is tagged. This is the first version wi
 - The journal opens with the open points, and `knowledge/handoff.md` is gone.
 - The README states the limits of the research preview and where feedback goes.
 - `certifi` is updated to 2026.10.23, which drops the distrusted emSign CA.
+- `contract.py` rejects a review history in which an agent records `human_verified` or `accepted`, and an unknown `actor_kind`.
+- A non-finite `Retry-After` header no longer aborts the provider retry loop.
+- Step 1 imports `pymupdf` instead of the deprecated `fitz`, and the inventory records POSIX paths on every platform.
 - `CITATION.cff` names both licences and no longer carries a release date that no tag backed. This changelog is new.
 
 ## 0.10.0, research preview
