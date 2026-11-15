@@ -30,6 +30,8 @@ The release date is set when the version is tagged. This is the first version wi
 - The Anthropic read timeout grows with the output limit, so a long chunk no longer times out into paid retries.
 - Step 3 reads `null` in the optional page fields `page_type`, `notes` and `foreign_paragraphs` as omitted. Smaller local models answer this way, and the unchanged answer stays in the call record.
 - The publication gate names the first contract violation of a blocking canonical transcription.
+- The contract checks that stored page types and their counts match the pages. Character counts stay unchecked, because a hand correction may change them.
+- A non-numeric value of a numeric setting stops with the variable's name instead of a traceback, and the review server names a missing related file by file name.
 - `CITATION.cff` names both licences and no longer carries a release date that no tag backed. This changelog is new.
 
 ## 0.10.0, research preview

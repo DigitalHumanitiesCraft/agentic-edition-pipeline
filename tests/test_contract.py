@@ -174,6 +174,12 @@ FILE_CASES = {
         ),
         ["executed_prompts"],
     ),
+    "page-types-disagree": (
+        lambda d: d["quality_signals"].__setitem__(
+            "page_types", ["content"] * len(d["pages"])
+        ),
+        ["page types do not match the pages"],
+    ),
     "surplus-image-urls": (
         lambda d: d["metadata"].__setitem__(
             "image_urls",

@@ -554,8 +554,17 @@ class ReviewHandler(SimpleHTTPRequestHandler):
             )
         except FileExistsError as exc:
             self._json(409, {"error": str(exc)})
-        except FileNotFoundError:
-            self._json(404, {"error": "Unknown document or page"})
+        except FileNotFoundError as exc:
+            # A missing related file (TEI, validated JSON) is named by file
+            # name only, so the answer reveals no local path.
+            missing = Path(exc.filename).name if exc.filename else ""
+            self._json(
+                404,
+                {
+                    "error": "Unknown document or page"
+                    + (f", or missing file {missing}" if missing else "")
+                },
+            )
         except (ValueError, UnicodeError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception:

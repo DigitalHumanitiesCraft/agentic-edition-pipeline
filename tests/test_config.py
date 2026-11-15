@@ -360,6 +360,13 @@ def test_default_anthropic_limit_holds_the_default_chunk():
     assert config.chunk_output_error("anthropic", config.CHUNK_SIZE) is None
 
 
+def test_invalid_numeric_setting_names_the_variable(monkeypatch):
+    monkeypatch.setenv("CHUNK_SIZE", "twenty")
+
+    with pytest.raises(SystemExit, match="CHUNK_SIZE='twenty' is not a valid int"):
+        config.env_number("CHUNK_SIZE", "20", int)
+
+
 def test_require_provider_stops_before_a_call(capsys):
     with pytest.raises(SystemExit):
         config.require_provider("mistral", "m")

@@ -21,11 +21,11 @@ The agent appends one entry per work session with date, goal, verified result an
 
 - The operator sets the release date, tags and releases version 0.11.0. The date goes into `CHANGELOG.md` and as `date-released` into `CITATION.cff` (entries of 15 November 2026).
 - The Pages workflow fails on every push to `main` of the template repository, because it holds no TEI for the publication gate. A condition that skips the deploy job only in the template repository was refused by the permission check of the agent session and needs the operator's release or the operator's own edit (entry of 15 November 2026).
-- The operator decides whether step 6 keeps the last publication of an object whose rebuild failed. Today it removes it, as the tests require (entry of 15 November 2026).
 - The operator decides whether the scripts validate the BCP 47 language codes that become `langUsage/language/@ident` (entry of 27 September 2026, [[01_PROJECT]]).
 - Annotation bindings in the Pages job should pass now that canonical transcriptions are versioned, which settles the cause named on 27 September 2026. No Pages run with annotations has verified it.
 - `knowledge/00_INDEX.md`, `knowledge/template/overview.md` and `knowledge/template/lineage.md` carry `status: complete` beside the research-preview label. The field states document maturity, and whether it stays is open.
-- Smaller gaps without a decision yet: `quality_signals` counters are not checked against the pages, step 4 staleness ignores changes to the deterministic rules, a review save replaces judge findings of unedited pages in the validated file, a missing related file yields a 404 "Unknown document" from the review server, and a non-integer `ANTHROPIC_MAX_TOKENS` or `CHUNK_SIZE` stops every step at import.
+- Step 4 does not treat a change of its deterministic rules as staleness. Recomputing on such a change would also discard paid judge results, so a fix needs a design that renews only the deterministic part (entry of 15 November 2026).
+- A review save replaces the judge findings of unedited pages in the validated file, and they survive only in the backup (entry of 15 November 2026).
 - A stable version 1.0 needs a completed and accepted run with a real edition project: a corpus with cleared rights, a paid pilot with a chosen model and cost limit, a named person for the scholarly review and acceptance, and a decision on publishing that project's site. The questions are with the operator (entry of 15 November 2026).
 
 ## Format

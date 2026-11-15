@@ -573,7 +573,9 @@ def _provenance_violations(value: object, prefix: str) -> list[str]:
     return problems
 
 
-def _quality_signal_violations(value: object, page_count: int | None) -> list[str]:
+def _quality_signal_violations(
+    value: object, page_count: int | None, pages: list | None = None
+) -> list[str]:
     """Check optional derived quality signals before consumers use them."""
     if not isinstance(value, dict):
         return ["quality_signals is not an object"]
@@ -586,6 +588,14 @@ def _quality_signal_violations(value: object, page_count: int | None) -> list[st
         problems.append("quality_signals.page_types is not a list of known page types")
     elif page_count is not None and len(page_types) != page_count:
         problems.append("quality_signals.page_types count does not match pages")
+    elif pages is not None and not problems:
+        # Page types and their counts follow from the pages. Character counts
+        # are left out, since a hand correction may change them without
+        # recomputing, and needs_review also depends on the image count.
+        expected = compute_quality_signals({"pages": pages}, len(pages))
+        structural = ("page_types", *QUALITY_COUNT_FIELDS[1:])
+        if any(value.get(key) != expected.get(key) for key in structural):
+            problems.append("quality_signals page types do not match the pages")
 
     for field in QUALITY_COUNT_FIELDS:
         if not _is_count(value.get(field)):
@@ -905,7 +915,11 @@ def file_violations(data: object) -> list[str]:
 
     page_count = len(pages) if isinstance(pages, list) else None
     if "quality_signals" in data:
-        problems += _quality_signal_violations(data["quality_signals"], page_count)
+        problems += _quality_signal_violations(
+            data["quality_signals"],
+            page_count,
+            pages if page_count is not None and not problems else None,
+        )
 
     if "transcription_meta" in data:
         problems += _provenance_violations(transcription_meta, "transcription_meta")

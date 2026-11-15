@@ -76,16 +76,26 @@ VALIDATION_MODEL = os.environ.get("VALIDATION_MODEL", "")
 # cache identity, so the recorded value is the one actually used.
 TEMPERATURE = 0.1
 
-BATCH_DELAY = float(os.environ.get("BATCH_DELAY", "2.0"))
-CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "20"))
+
+def env_number(name: str, default: str, cast: type[int] | type[float]) -> int | float:
+    """Read a numeric setting and stop with its name instead of a traceback."""
+    raw = os.environ.get(name, default)
+    try:
+        return cast(raw)
+    except ValueError:
+        sys.exit(f"ERROR: {name}={raw!r} is not a valid {cast.__name__}.")
+
+
+BATCH_DELAY = env_number("BATCH_DELAY", "2.0", float)
+CHUNK_SIZE = env_number("CHUNK_SIZE", "20", int)
 # Anthropic requires an explicit output limit. A limit the model does not
 # support fails with HTTP 400 before any billing; a limit too small for the
 # chunk fails only after a paid call, so the transcription step compares it
 # with the chunk size first, using a deliberate per-page estimate for a dense
 # page of transcription in JSON.
-ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "32000"))
+ANTHROPIC_MAX_TOKENS = env_number("ANTHROPIC_MAX_TOKENS", "32000", int)
 OUTPUT_TOKENS_PER_PAGE = 1500
-IMAGE_DPI = int(os.environ.get("IMAGE_DPI", "150"))
+IMAGE_DPI = env_number("IMAGE_DPI", "150", int)
 SUPPORTED_PROVIDERS = frozenset({"gemini", "openai", "anthropic", "ollama"})
 
 # Provider errors quote the request URL and headers, so an unredacted

@@ -51,6 +51,7 @@ from config import (
     XML_NS,
     add_selection_args,
     configure_console,
+    env_number,
     finish_run,
     provenance_meta,
     read_json,
@@ -61,9 +62,9 @@ from config import (
 )
 
 FETCH_TIMEOUT = 60
-FETCH_DELAY_SECONDS = float(os.environ.get("FETCH_DELAY_SECONDS", "0.5"))
-FETCH_MAX_RETRIES = int(os.environ.get("FETCH_MAX_RETRIES", "3"))
-FETCH_BACKOFF_SECONDS = float(os.environ.get("FETCH_BACKOFF_SECONDS", "1.0"))
+FETCH_DELAY_SECONDS = env_number("FETCH_DELAY_SECONDS", "0.5", float)
+FETCH_MAX_RETRIES = env_number("FETCH_MAX_RETRIES", "3", int)
+FETCH_BACKOFF_SECONDS = env_number("FETCH_BACKOFF_SECONDS", "1.0", float)
 # Upper bound for one downloaded facsimile, held in memory before it is
 # verified. An uncompressed 600-dpi A3 RGB TIFF (7020 x 9900 pixels) is about
 # 208 MB and fits; an endless or hostile response is cut off.
